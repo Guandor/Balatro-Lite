@@ -54,6 +54,16 @@ TRIM_SHADERS=1
 PERF_OPTIMIZATIONS=1
 export BALATRO_PM_PERF_OPTIMIZATIONS="$PERF_OPTIMIZATIONS"
 
+# Which physical button is A is decided by the handheld, not by the game. Some
+# devices print the Xbox arrangement and some the Nintendo one, and the SDL
+# mapping a device ships with does not always agree with its own case lettering,
+# so the button under the player's thumb can report itself as another letter or
+# as nothing at all. The first launch asks for each button by the letter printed
+# beside it and keeps the answer in the saves folder. Delete that file, or set
+# this to 1, to be asked again.
+FORCE_BUTTON_SETUP=0
+BUTTON_MAP_FILE="$GAMEDIR/saves/controller-map.txt"
+
 # One patched build serves every device. The handheld layout reads the panel's
 # real dimensions at startup, and the only device-specific behaviour left --
 # which face button is which -- is passed in the environment at launch.
@@ -209,9 +219,13 @@ if [ -n "$GAMEFILE" ] && [ ! -f "$OUTPUT_GAME" ]; then
   cleanup_patch_work
 fi
 
+DEVICE_PRINTS_SWAPPED_FACE_LABELS=0
+
 if [ "${DEVICE_NAME}" = "TrimUI Smart Pro" ] || [ "${DEVICE_NAME}" = "TrimUI Brick" ]; then
-  # TrimUI prints its face buttons in the physical AB/XY order.
-  export BALATRO_PM_SWAP_FACE_BUTTONS=1
+  # TrimUI prints its face buttons in the physical AB/XY order. This is only the
+  # guess used when the player has not answered the button setup; an answer
+  # describes the device it was given on and always wins.
+  DEVICE_PRINTS_SWAPPED_FACE_LABELS=1
 
   # The bundled versions of these libraries conflict with TrimUI's runtime.
   LIBDIR="$GAMEDIR/libs.${DEVICE_ARCH}"
@@ -228,8 +242,46 @@ if [ ! -f "$LAUNCH_GAME" ] && [ -f "Balatro" ]; then
 fi
 
 if [ -f "$LAUNCH_GAME" ]; then
-  $GPTOKEYB "love.${DEVICE_ARCH}" &
   pm_platform_helper "./bin/love.${DEVICE_ARCH}"
+
+  # Both of these sit after the platform helper, so the questions are asked on
+  # the display the game is about to use, under the same environment, and
+  # nothing the helper sets up can overwrite the mapping afterwards. They sit
+  # before gptokeyb because it is started to watch the game: the setup screen
+  # brings its own ways out instead -- it gives up on its own if it is left
+  # alone, and quits rather than stopping on an error.
+  if [ "$FORCE_BUTTON_SETUP" -eq 1 ] || [ ! -f "$BUTTON_MAP_FILE" ]; then
+    echo "Checking which button is which..."
+    BALATRO_PM_BUTTON_MAP_FILE="$BUTTON_MAP_FILE" \
+      BALATRO_PM_BUTTON_FONT="$GAMEDIR/resources/fonts/Nunito-Black.ttf" \
+      ./bin/love.${DEVICE_ARCH} ./buttonsetup
+  fi
+
+  # A run that ends without an answer -- skipped, timed out, or no controller
+  # attached -- still leaves the file behind, holding comments and no mapping,
+  # so the questions are asked once rather than on every launch.
+  BUTTON_MAP=""
+  if [ -f "$BUTTON_MAP_FILE" ]; then
+    BUTTON_MAP=$(grep -v '^[[:space:]]*#' "$BUTTON_MAP_FILE" | grep -m 1 '[^[:space:]]')
+  fi
+
+  if [ -n "$BUTTON_MAP" ]; then
+    # SDL reads this before anything opens the pad, and a mapping given here
+    # outranks both the device's own database entry and the one LOVE bundles.
+    # Balatro then sees the buttons under the names the player gave them, which
+    # is also what its on-screen prompts are drawn from. Appended last: SDL
+    # keeps the final mapping for a given controller.
+    if [ -n "$SDL_GAMECONTROLLERCONFIG" ]; then
+      export SDL_GAMECONTROLLERCONFIG="${SDL_GAMECONTROLLERCONFIG}
+${BUTTON_MAP}"
+    else
+      export SDL_GAMECONTROLLERCONFIG="$BUTTON_MAP"
+    fi
+  elif [ "$DEVICE_PRINTS_SWAPPED_FACE_LABELS" -eq 1 ]; then
+    export BALATRO_PM_SWAP_FACE_BUTTONS=1
+  fi
+
+  $GPTOKEYB "love.${DEVICE_ARCH}" &
   ./bin/love.${DEVICE_ARCH} "$LAUNCH_GAME"
 else
   echo "Balatro game file not found. Copy Balatro.exe or Balatro.love into the balatro folder, then launch again."

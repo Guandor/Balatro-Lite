@@ -89,6 +89,11 @@ G.FPS_CAP = 60
 -- the launcher passes it in the environment and the same build stays portable
 -- between devices. set_globals derives button_mapping from these when the Game
 -- is constructed, which has already happened by the time this file is read.
+--
+-- This is the fallback for devices known to print their letters in the other
+-- order. Once the player has answered the launcher's button setup, the pad is
+-- corrected below the game instead -- SDL reports the letters the player gave
+-- it -- and the launcher stops setting this, because the two would cancel out.
 if os.getenv('BALATRO_PM_SWAP_FACE_BUTTONS') == '1' then
     G.F_SWAP_AB_BUTTONS = true
     G.F_SWAP_XY_BUTTONS = true
