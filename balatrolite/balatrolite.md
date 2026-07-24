@@ -9,15 +9,12 @@ You need to own Balatro on Steam. The macOS or the Windows version is fine.
 
 ## What's different
 
-- **Fills the screen.** The playfield takes your device's aspect ratio instead of sitting inside a letterboxed desktop window — on a 4:3 handheld everything is drawn about 29% larger.
-- **A layout built for a small screen.** The desktop sidebar becomes a single top status bar, the shop fits on one panel, and card descriptions are larger. Nothing runs off the edges.
+- **Fills the screen.** The playfield takes your device's own aspect ratio and uses the whole panel, so everything is drawn noticeably larger.
+- **A layout built for a small screen.** The desktop sidebar becomes a single top status bar, the shop drops its oversized animated sign so the whole storefront fits on screen, and card descriptions are larger. The clearer Nunito font is used on every device.
 - **Runs lighter.** CRT, bloom, shadows, and screen shake are off, the two full-screen shaders are trimmed, and the animated background is cached instead of redrawn every frame.
 
-In short, it's uglier, but it runs better and fits small screens better.
 
-![Blind selection](https://i.imgur.com/41sCbHl.jpeg)
-![Playing a hand](https://i.imgur.com/QPrUJBH.jpeg)
-![The shop](https://i.imgur.com/QRXpMAK.jpeg)
+In short, it's uglier, but it runs better and fits small screens better.
 
 ## Installation
 
@@ -27,6 +24,14 @@ In short, it's uglier, but it runs better and fits small screens better.
    - **Windows:** Steam → right-click Balatro → Manage → Browse Local Files. Copy `Balatro.exe`.
    - **macOS:** Steam → right-click Balatro → Manage → Browse Local Files. Right-click `Balatro.app` → Show Package Contents → `Contents/Resources`. Copy `Balatro.love`.
 4. Launch it. The first start builds a patched copy called `Balatro_pm`, which takes a moment.
+
+## Screenshots
+
+![Blind selection](https://i.imgur.com/41sCbHl.jpeg)
+![Playing a hand](https://i.imgur.com/QPrUJBH.jpeg)
+![The shop](https://i.imgur.com/QRXpMAK.jpeg)
+
+
 
 
 ## Notes
