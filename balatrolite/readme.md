@@ -13,6 +13,12 @@ You need to own Balatro on Steam. The macOS or the Windows version is fine.
 - **A layout built for a small screen.** The desktop sidebar becomes a single top status bar, the shop fits on one panel, and card descriptions are larger. Nothing runs off the edges.
 - **Runs lighter.** CRT, bloom, shadows, and screen shake are off, the two full-screen shaders are trimmed, and the animated background is cached instead of redrawn every frame.
 
+In short, it's uglier, but it runs better and fits small screens better.
+
+![Blind selection](https://i.imgur.com/41sCbHl.jpeg)
+![Playing a hand](https://i.imgur.com/QPrUJBH.jpeg)
+![The shop](https://i.imgur.com/QRXpMAK.jpeg)
+
 ## Installation
 
 1. Buy the game on [Steam](https://store.steampowered.com/app/2379780/Balatro/).
