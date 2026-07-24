@@ -3,6 +3,7 @@
 [Balatro](https://www.playbalatro.com/), the poker-inspired roguelike deck builder, with an interface rebuilt for handheld screens.
 
 This installs alongside the original Balatro port and keeps its own saves, so you can run either one.
+Thanks to nkahoang for making [the original Balatro port](https://portmaster.games/detail.html?name=balatro).
 
 You need to own Balatro on Steam. The macOS or the Windows version is fine.
 
@@ -15,7 +16,7 @@ You need to own Balatro on Steam. The macOS or the Windows version is fine.
 ## Installation
 
 1. Buy the game on [Steam](https://store.steampowered.com/app/2379780/Balatro/).
-2. Copy the file into your ports folder.
+2. Copy the files into your ports folder.
 3. Copy your game file into the `balatrolite` folder — it needs its own copy even if you already have the original port installed:
    - **Windows:** Steam → right-click Balatro → Manage → Browse Local Files. Copy `Balatro.exe`.
    - **macOS:** Steam → right-click Balatro → Manage → Browse Local Files. Right-click `Balatro.app` → Show Package Contents → `Contents/Resources`. Copy `Balatro.love`.
