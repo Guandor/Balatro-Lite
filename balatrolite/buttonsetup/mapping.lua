@@ -26,6 +26,18 @@ function M.split(mapping)
     return fields
 end
 
+-- The set of controls a mapping already binds, by name.
+function M.controls(mapping)
+    local bound = {}
+    if not mapping or mapping == '' then return bound end
+    local fields = M.split(mapping)
+    for i = 3, #fields do
+        local control = fields[i]:match('^([^:]+):')
+        if control then bound[control] = true end
+    end
+    return bound
+end
+
 -- A name with a comma in it would be read back as an extra control field.
 function M.sanitize_name(name)
     name = (name or ''):gsub(',', ' '):gsub('^%s+', ''):gsub('%s+$', '')

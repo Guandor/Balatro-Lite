@@ -11,7 +11,8 @@
 --
 -- The game and its saves are untouched. The only thing written is one mapping
 -- line in the port's saves folder, and that file is also the record of having
--- run: deleting it is how the player asks for the questions again.
+-- run: removing it is how the questions get asked again, which is all the
+-- game's own "Set Up Buttons" option does.
 
 local mapping = require('mapping')
 
@@ -23,21 +24,29 @@ local FONT_PATH = os.getenv('BALATRO_PM_BUTTON_FONT')
 -- run gives up on its own, and the wizard is skipped rather than retried.
 local IDLE_TIMEOUT = 60
 local NO_PAD_TIMEOUT = 12
-local OPTIONAL_SKIP = 8
 -- One press must not answer two questions.
 local INPUT_COOLDOWN = 0.3
 local AXIS_TRAVEL = 0.6
 local AXIS_RETURN = 0.35
 local MESSAGE_TIME = 1.6
 
--- The four the player actually asks about. A device that already has a usable
--- SDL mapping needs no more than these: everything else in that mapping was
--- right to begin with.
-local FACE_STEPS = {
+-- The buttons whose lettering is the device's own business. A device that
+-- already has a usable SDL mapping needs no more than these: everything else in
+-- that mapping was right to begin with. The shoulders and triggers are optional
+-- because plenty of handhelds have only two of the four, or none.
+local CORE_STEPS = {
     {control = 'a', cue = 'A', prompt = 'Press the button marked A'},
     {control = 'b', cue = 'B', prompt = 'Press the button marked B'},
     {control = 'x', cue = 'X', prompt = 'Press the button marked X'},
     {control = 'y', cue = 'Y', prompt = 'Press the button marked Y'},
+    {control = 'leftshoulder', cue = 'L1', prompt = 'Press the LEFT shoulder button',
+     optional = true},
+    {control = 'lefttrigger', cue = 'L2', prompt = 'Press the LEFT trigger',
+     optional = true},
+    {control = 'rightshoulder', cue = 'R1', prompt = 'Press the RIGHT shoulder button',
+     optional = true},
+    {control = 'righttrigger', cue = 'R2', prompt = 'Press the RIGHT trigger',
+     optional = true},
 }
 
 -- Asked only when SDL has no mapping for the device at all, in which case none
@@ -49,11 +58,9 @@ local REST_STEPS = {
     {control = 'dpright', cue = 'RIGHT', prompt = 'Press D-pad RIGHT'},
     {control = 'start', cue = 'START', prompt = 'Press START'},
     {control = 'back', cue = 'SELECT', prompt = 'Press SELECT'},
-    {control = 'leftshoulder', cue = 'L1', prompt = 'Press the LEFT shoulder button',
-     optional = true},
-    {control = 'rightshoulder', cue = 'R1', prompt = 'Press the RIGHT shoulder button',
-     optional = true},
 }
+
+local TRIGGERS = {lefttrigger = true, righttrigger = true}
 
 local BG = {0.09, 0.13, 0.17}
 local PANEL = {0.16, 0.22, 0.28}
@@ -63,11 +70,11 @@ local DIM = {0.62, 0.68, 0.72}
 
 local state = 'intro'
 local pad, base_mapping
-local steps, step_index = FACE_STEPS, 1
+local steps, step_index = CORE_STEPS, 1
 local learned = {}
 local built_mapping
 local axis_rest, axis_held = {}, {}
-local cooldown, idle, message, message_timer, optional_timer = 0, 0, nil, 0, 0
+local cooldown, idle, message, message_timer = 0, 0, nil, 0
 local fonts, font_data
 
 --------------------------------------------------------------------------- io
@@ -155,9 +162,21 @@ local function begin_steps()
     end
 
     steps = {}
-    for _, step in ipairs(FACE_STEPS) do steps[#steps + 1] = step end
+    for _, step in ipairs(CORE_STEPS) do steps[#steps + 1] = step end
     if not base_mapping then
         for _, step in ipairs(REST_STEPS) do steps[#steps + 1] = step end
+    else
+        -- The last screen is confirmed with START and SELECT. On a device whose
+        -- mapping does not bind them there would be nothing to confirm with, so
+        -- ask for whichever is missing even though it is otherwise the short
+        -- form. Everything else in an existing mapping is left alone.
+        local bound = mapping.controls(base_mapping)
+        for _, step in ipairs(REST_STEPS) do
+            if (step.control == 'start' or step.control == 'back') and
+               not bound[step.control] then
+                steps[#steps + 1] = step
+            end
+        end
     end
 
     -- Triggers rest at one end of their travel rather than in the middle, so
@@ -167,14 +186,12 @@ local function begin_steps()
 
     step_index, learned = 1, {}
     state = 'prompt'
-    optional_timer = 0
 end
 
 local function restart_steps()
     learned = {}
     step_index = 1
     state = 'prompt'
-    optional_timer = 0
     message, message_timer = nil, 0
 end
 
@@ -189,31 +206,50 @@ local function finish_steps()
 end
 
 local function advance()
-    if step_index > #steps then
-        finish_steps()
-    else
-        optional_timer = 0
+    if step_index > #steps then finish_steps() end
+end
+
+-- `a3` and `+a3` are one physical axis written two ways.
+local function same_input(one, other)
+    return one:gsub('^[+-]', '') == other:gsub('^[+-]', '')
+end
+
+local function learned_input(control)
+    for _, entry in ipairs(learned) do
+        if entry.control == control then return entry.input end
     end
+end
+
+local function next_step()
+    step_index = step_index + 1
+    cooldown = INPUT_COOLDOWN
+    message, message_timer = nil, 0
+    advance()
 end
 
 local function record(input)
     local step = steps[step_index]
     if not step then return end
 
+    -- Half the handhelds this runs on are missing a shoulder or a trigger, so
+    -- there has to be a way to say so. A is the button that is certain to exist
+    -- by the time any of those are asked for.
+    local a_input = learned_input('a')
+    if step.optional and a_input and same_input(input, a_input) then
+        next_step()
+        return
+    end
+
     for _, entry in ipairs(learned) do
-        if entry.input == input then
-            message = 'That is already ' .. entry.control:upper() ..
-                '. Try a different button.'
+        if same_input(entry.input, input) then
+            message = 'That is already ' .. entry.cue .. '.'
             message_timer = MESSAGE_TIME
             return
         end
     end
 
-    learned[#learned + 1] = {control = step.control, input = input}
-    step_index = step_index + 1
-    cooldown = INPUT_COOLDOWN
-    message, message_timer = nil, 0
-    advance()
+    learned[#learned + 1] = {control = step.control, input = input, cue = step.cue}
+    next_step()
 end
 
 -- Any pad may claim the wizard on its first press; after that only that one is
@@ -234,20 +270,18 @@ local function handle(joystick, input)
     elseif state == 'prompt' then
         record(input)
     elseif state == 'confirm' then
-        -- The confirmation is meant to be answered through the new mapping,
-        -- but a device SDL still refuses to treat as a gamepad would have no
-        -- way to answer at all. The raw inputs just learned stand in for it.
-        for _, entry in ipairs(learned) do
-            if entry.input == input then
-                if entry.control == 'a' then
-                    cooldown = INPUT_COOLDOWN
-                    save_and_quit()
-                elseif entry.control == 'b' then
-                    cooldown = INPUT_COOLDOWN
-                    restart_steps()
-                end
-                return
-            end
+        -- Only reached on a device SDL still will not treat as a gamepad, where
+        -- the buttons below cannot answer for themselves. Nothing but START and
+        -- SELECT is accepted here: the face buttons are the ones being changed,
+        -- which makes them the wrong thing to confirm the change with.
+        local start_input = learned_input('start')
+        local back_input = learned_input('back')
+        if start_input and same_input(input, start_input) then
+            cooldown = INPUT_COOLDOWN
+            save_and_quit()
+        elseif back_input and same_input(input, back_input) then
+            cooldown = INPUT_COOLDOWN
+            restart_steps()
         end
     end
 end
@@ -266,10 +300,10 @@ end
 function love.gamepadpressed(joystick, button)
     if state ~= 'confirm' or not accepts(joystick) or cooldown > 0 then return end
     idle = 0
-    if button == 'a' then
+    if button == 'start' then
         cooldown = INPUT_COOLDOWN
         save_and_quit()
-    elseif button == 'b' then
+    elseif button == 'back' then
         cooldown = INPUT_COOLDOWN
         restart_steps()
     end
@@ -284,11 +318,19 @@ end
 
 local function poll_axes()
     if not pad then return end
+    local step = state == 'prompt' and steps[step_index] or nil
     for i = 1, pad:getAxisCount() do
         local travel = pad:getAxis(i) - (axis_rest[i] or 0)
         if not axis_held[i] and math.abs(travel) > AXIS_TRAVEL then
             axis_held[i] = true
-            handle(pad, (travel > 0 and '+a' or '-a') .. (i - 1))
+            -- An analogue trigger is written as the whole axis, which is how
+            -- SDL knows to read its resting end as "not pressed". Everything
+            -- else takes the half of the axis that was actually moved.
+            if step and TRIGGERS[step.control] then
+                handle(pad, 'a' .. (i - 1))
+            else
+                handle(pad, (travel > 0 and '+a' or '-a') .. (i - 1))
+            end
         elseif axis_held[i] and math.abs(travel) < AXIS_RETURN then
             axis_held[i] = false
         end
@@ -319,18 +361,6 @@ function love.update(dt)
     if idle > IDLE_TIMEOUT then
         finish_without_mapping('setup timed out')
         return
-    end
-
-    -- A device without shoulder buttons still has to be able to get past the
-    -- question about them.
-    local step = steps[step_index]
-    if state == 'prompt' and step and step.optional then
-        optional_timer = optional_timer + dt
-        if optional_timer > OPTIONAL_SKIP then
-            step_index = step_index + 1
-            optional_timer = 0
-            advance()
-        end
     end
 end
 
@@ -384,9 +414,7 @@ function love.draw()
     centred(fonts.title, 'BALATRO LITE  ·  BUTTON SETUP', h*0.06, DIM)
 
     if state == 'intro' then
-        local y = centred(fonts.body, 'Which button is A is up to your device,', h*0.3)
-        y = centred(fonts.body, 'not up to the game.', y)
-        centred(fonts.body, 'Press any button to begin.', y + h*0.06, ACCENT)
+        centred(fonts.body, 'Press any button to begin.', h*0.42, ACCENT)
         if #love.joystick.getJoysticks() == 0 then
             centred(fonts.hint, 'No controller detected. Skipping shortly.', h*0.8, DIM)
         else
@@ -403,9 +431,8 @@ function love.draw()
                 centred(fonts.hint, message, y + h*0.03, ACCENT)
             elseif step.optional then
                 centred(fonts.hint,
-                    string.format('No such button? Wait %d seconds to skip it.',
-                        math.max(0, math.ceil(OPTIONAL_SKIP - optional_timer))),
-                    y + h*0.03, DIM)
+                    string.format('No %s on this device? Press A to skip it.',
+                        step.cue), y + h*0.03, DIM)
             end
             centred(fonts.hint,
                 string.format('%d of %d', step_index, #steps), h*0.85, DIM)
@@ -413,11 +440,11 @@ function love.draw()
         end
     elseif state == 'confirm' then
         local y = centred(fonts.body, 'Buttons set.', h*0.28, TEXT)
-        y = centred(fonts.body, 'Press A to save.', y + h*0.06, ACCENT)
-        y = centred(fonts.body, 'Press B to start over.', y)
+        y = centred(fonts.body, 'Press START to save.', y + h*0.06, ACCENT)
+        centred(fonts.body, 'Press SELECT to start over.', y)
         centred(fonts.hint,
-            'These are the buttons you just pressed, so if the wrong one\n' ..
-            'answers this, start over.', h*0.8, DIM)
+            'START and SELECT are not changed by this setup, so they\n' ..
+            'answer here the same as they always did.', h*0.8, DIM)
     elseif state == 'saved' then
         centred(fonts.body, 'Saved. Starting Balatro...', h*0.45)
     end

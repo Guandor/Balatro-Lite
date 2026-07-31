@@ -243,6 +243,148 @@ function create_UIBox_main_menu_buttons(...)
     return result
 end
 
+-- The launcher asks which physical button is which on the first start and keeps
+-- the answer in this file. Removing it is the whole of "ask me again", so the
+-- options menu gets an entry that does exactly that. The setup itself runs
+-- before the game, where it can hand the mapping to SDL before anything opens
+-- the pad, so this schedules it rather than showing it now.
+local BUTTON_MAP_FILE = os.getenv('BALATRO_PM_BUTTON_MAP_FILE')
+
+local function button_setup_is_pending()
+    if not BUTTON_MAP_FILE then return false end
+    local file = io.open(BUTTON_MAP_FILE, 'r')
+    if not file then return true end
+    file:close()
+    return false
+end
+
+local function node_holds_button(node)
+    if type(node) ~= 'table' then return false end
+    if node.config and node.config.button then return true end
+    if node.nodes then
+        for _, child in pairs(node.nodes) do
+            if node_holds_button(child) then return true end
+        end
+    end
+    return false
+end
+
+-- The stock menu is a list of UIBox_button results sitting in one node list.
+-- Rather than assume where that list is, find it -- the one with the most
+-- direct children that lead to a button -- and add to it. The new entry is then
+-- built and placed exactly like its neighbours, whatever the layout around them
+-- turns out to be, and a menu this fails to recognise is simply left alone.
+local function find_button_list(node, best)
+    if type(node) ~= 'table' or type(node.nodes) ~= 'table' then return best end
+    local count = 0
+    for _, child in pairs(node.nodes) do
+        if node_holds_button(child) then count = count + 1 end
+    end
+    -- Two, so that a lone button in a wrapper is never mistaken for the list.
+    if count >= 2 and count > (best and best.count or 0) then
+        best = {list = node.nodes, count = count}
+    end
+    for _, child in pairs(node.nodes) do
+        best = find_button_list(child, best)
+    end
+    return best
+end
+
+local function button_setup_node()
+    return UIBox_button{
+        id = 'small_screen_button_setup',
+        label = {button_setup_is_pending() and 'Buttons: On Restart'
+            or 'Set Up Buttons'},
+        button = 'small_screen_button_setup',
+        minw = 5, colour = G.C.BLUE
+    }
+end
+
+-- Neighbours in that list may be wrapped a layer deep. Match whatever shape
+-- they have, so the new entry lines up with them instead of beside them.
+local function shaped_like(sibling, node)
+    if type(sibling) ~= 'table' or sibling.config and sibling.config.button then
+        return node
+    end
+    if type(sibling.nodes) ~= 'table' or #sibling.nodes ~= 1 then return node end
+    return {n = sibling.n, config = {align = sibling.config and sibling.config.align},
+        nodes = {node}}
+end
+
+local function append_to_button_list(definition)
+    local best = find_button_list(definition, nil)
+    if not best then return end
+    local sibling
+    for _, child in pairs(best.list) do
+        if node_holds_button(child) then sibling = child end
+    end
+    local ok, node = pcall(button_setup_node)
+    if ok and node then
+        best.list[#best.list+1] = shaped_like(sibling, node)
+    end
+end
+
+-- The menu builds itself from a list of entries before any of it becomes a node
+-- tree. Adding to that list is worth a little bookkeeping: the entry is then
+-- built and placed by the stock code, exactly like the ones beside it. The tree
+-- is only searched when this menu turns out not to be built that way.
+local building_options, added_to_contents = false, false
+
+if type(create_UIBox_generic_options) == 'function' then
+    local original_generic = create_UIBox_generic_options
+    function create_UIBox_generic_options(args, ...)
+        if building_options and type(args) == 'table' and
+           type(args.contents) == 'table' then
+            local ok, node = pcall(button_setup_node)
+            if ok and node then
+                args.contents[#args.contents+1] = node
+                added_to_contents = true
+            end
+        end
+        return original_generic(args, ...)
+    end
+end
+
+local function add_button_setup_option(build, ...)
+    if not BUTTON_MAP_FILE then return build(...) end
+    building_options, added_to_contents = true, false
+    local ok, definition = pcall(build, ...)
+    building_options = false
+    if not ok then error(definition) end
+    if not added_to_contents then
+        pcall(append_to_button_list, definition)
+    end
+    return definition
+end
+
+local rebuild_options
+
+G.FUNCS.small_screen_button_setup = function()
+    if BUTTON_MAP_FILE then os.remove(BUTTON_MAP_FILE) end
+    -- Reopen the menu so the entry reports back, rather than looking unpressed.
+    if rebuild_options then
+        pcall(function()
+            G.FUNCS.overlay_menu{definition = rebuild_options()}
+        end)
+    end
+end
+
+if type(create_UIBox_options) == 'function' then
+    local original_options = create_UIBox_options
+    rebuild_options = function(...)
+        return add_button_setup_option(original_options, ...)
+    end
+    function create_UIBox_options(...)
+        return rebuild_options(...)
+    end
+elseif G.UIDEF and type(G.UIDEF.options) == 'function' then
+    local original_options = G.UIDEF.options
+    rebuild_options = function(...)
+        return add_button_setup_option(original_options, ...)
+    end
+    G.UIDEF.options = rebuild_options
+end
+
 function set_screen_positions()
     if G.STAGE == G.STAGES.RUN then
         compact_owned_jokers()

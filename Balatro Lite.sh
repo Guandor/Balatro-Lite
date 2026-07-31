@@ -59,10 +59,14 @@ export BALATRO_PM_PERF_OPTIMIZATIONS="$PERF_OPTIMIZATIONS"
 # mapping a device ships with does not always agree with its own case lettering,
 # so the button under the player's thumb can report itself as another letter or
 # as nothing at all. The first launch asks for each button by the letter printed
-# beside it and keeps the answer in the saves folder. Delete that file, or set
-# this to 1, to be asked again.
+# beside it and keeps the answer in the saves folder. The game's options menu
+# offers to ask again, which it does by removing that file; deleting it by hand
+# or setting this to 1 has the same effect.
 FORCE_BUTTON_SETUP=0
 BUTTON_MAP_FILE="$GAMEDIR/saves/controller-map.txt"
+# The game is told where the answer lives too: its options menu offers to ask
+# again, which means removing this file for the next launch to act on.
+export BALATRO_PM_BUTTON_MAP_FILE="$BUTTON_MAP_FILE"
 
 # One patched build serves every device. The handheld layout reads the panel's
 # real dimensions at startup, and the only device-specific behaviour left --
@@ -252,8 +256,7 @@ if [ -f "$LAUNCH_GAME" ]; then
   # alone, and quits rather than stopping on an error.
   if [ "$FORCE_BUTTON_SETUP" -eq 1 ] || [ ! -f "$BUTTON_MAP_FILE" ]; then
     echo "Checking which button is which..."
-    BALATRO_PM_BUTTON_MAP_FILE="$BUTTON_MAP_FILE" \
-      BALATRO_PM_BUTTON_FONT="$GAMEDIR/resources/fonts/Nunito-Black.ttf" \
+    BALATRO_PM_BUTTON_FONT="$GAMEDIR/resources/fonts/Nunito-Black.ttf" \
       ./bin/love.${DEVICE_ARCH} ./buttonsetup
   fi
 
