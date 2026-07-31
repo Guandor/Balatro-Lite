@@ -31,6 +31,13 @@ mkdir -p "$XDG_DATA_HOME" "$XDG_CONFIG_HOME"
 ## Uncomment the following line to log output for debugging.
 # > "$GAMEDIR/log.txt" && exec > >(tee "$GAMEDIR/log.txt") 2>&1
 
+# Resolved before the cd below, which is what a relative $0 would be relative to.
+LAUNCHER="$0"
+case "$LAUNCHER" in
+  /*) ;;
+  *) LAUNCHER="$PWD/$LAUNCHER" ;;
+esac
+
 cd "$GAMEDIR" || exit 1
 
 $ESUDO chmod a+x ./bin/*
@@ -209,7 +216,23 @@ build_patched_game() {
   return 0
 }
 
-if [ -n "$GAMEFILE" ] && [ ! -f "$OUTPUT_GAME" ]; then
+# The build is made once and kept, so an updated port would otherwise keep
+# launching the archive the previous version produced -- the layout, the options
+# menu, and everything else patched in would silently stay at the old revision.
+# Rebuild when anything that goes into it is newer than it is.
+needs_build() {
+  [ -z "$GAMEFILE" ] && return 1
+  [ ! -f "$OUTPUT_GAME" ] && return 0
+  for source in "$LAUNCHER" "$GAMEDIR/patches/small_screen.lua" \
+                "$GAMEDIR/resources/fonts/Nunito-Black.ttf" "$GAMEDIR/$GAMEFILE"; do
+    if [ -f "$source" ] && [ "$source" -nt "$OUTPUT_GAME" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if needs_build; then
   echo "Preparing the ${OUTPUT_GAME} handheld build..."
   if build_patched_game; then
     echo "Handheld build ready."
