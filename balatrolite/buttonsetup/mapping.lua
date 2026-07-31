@@ -38,6 +38,20 @@ function M.controls(mapping)
     return bound
 end
 
+-- Whether one press would answer for both inputs, which is what makes binding
+-- them to two controls wrong. `a3` is the whole of axis 3 and so collides with
+-- either half of it, but `+a3` and `-a3` are opposite ends of one stick -- left
+-- and right, or up and down -- and are no more the same input than two buttons
+-- are. Treating those two as one is what would stop a D-pad or a pair of
+-- triggers sharing an axis from ever being answered.
+function M.conflict(one, other)
+    if one == other then return true end
+    local one_sign, one_axis = one:match('^([+-]?)a(%d+)$')
+    local other_sign, other_axis = other:match('^([+-]?)a(%d+)$')
+    if not one_axis or not other_axis or one_axis ~= other_axis then return false end
+    return one_sign == '' or other_sign == '' or one_sign == other_sign
+end
+
 -- A name with a comma in it would be read back as an extra control field.
 function M.sanitize_name(name)
     name = (name or ''):gsub(',', ' '):gsub('^%s+', ''):gsub('%s+$', '')
@@ -56,8 +70,15 @@ function M.build(guid, name, learned, base)
 
     if base and base ~= '' then
         local fields = M.split(base)
-        -- The base line's own name is the one the device is known by; keep it.
-        if fields[2] and fields[2] ~= '' then name = fields[2] end
+        -- The base line's own name is the one the device is known by, so keep
+        -- it -- unless it is the `*` that a catch-all database entry carries
+        -- instead of a name, which says nothing about the pad in hand. SDL
+        -- matches on the GUID and only ever shows this, so the pad's own name
+        -- is the better answer whenever the base has none worth having.
+        local base_name = fields[2]
+        if base_name and base_name ~= '' and base_name ~= '*' then
+            name = base_name
+        end
         for i = 3, #fields do
             local control, input = fields[i]:match('^([^:]+):(.+)$')
             if control then put(control, input) end
@@ -71,12 +92,19 @@ function M.build(guid, name, learned, base)
     -- An answer was given with the button in hand; a base entry that claims the
     -- same input for something else was already wrong, and is the reason for
     -- being here at all. Drop it rather than leave SDL with one input bound
-    -- twice, which would make that button do both things at once.
-    local claimed = {}
-    for _, entry in ipairs(learned) do claimed[entry.input] = entry.control end
+    -- twice, which would make that button do both things at once. Compared
+    -- through conflict rather than as text, because a base line writing an axis
+    -- as `+a2` and an answer writing it as `a2` are still the one input.
+    local answered = {}
+    for _, entry in ipairs(learned) do answered[entry.control] = true end
     for control, input in pairs(values) do
-        if claimed[input] and claimed[input] ~= control then
-            values[control] = nil
+        if not answered[control] then
+            for _, entry in ipairs(learned) do
+                if M.conflict(entry.input, input) then
+                    values[control] = nil
+                    break
+                end
+            end
         end
     end
 

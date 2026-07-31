@@ -24,6 +24,12 @@ local FONT_PATH = os.getenv('BALATRO_PM_BUTTON_FONT')
 -- run gives up on its own, and the wizard is skipped rather than retried.
 local IDLE_TIMEOUT = 60
 local NO_PAD_TIMEOUT = 12
+-- Giving up is the only way past a question the device cannot answer, so it is
+-- shown as a countdown rather than left for the player to discover by waiting
+-- out a minute of nothing. It appears late: counting the whole minute down would
+-- hurry someone who is only reading, while the last few seconds are exactly when
+-- "am I stuck here?" is the question being asked.
+local SKIP_WARNING = 15
 -- One press must not answer two questions.
 local INPUT_COOLDOWN = 0.3
 local AXIS_TRAVEL = 0.6
@@ -32,21 +38,18 @@ local MESSAGE_TIME = 1.6
 
 -- The buttons whose lettering is the device's own business. A device that
 -- already has a usable SDL mapping needs no more than these: everything else in
--- that mapping was right to begin with. The shoulders and triggers are optional
--- because plenty of handhelds have only two of the four, or none.
+-- that mapping was right to begin with. All four shoulders are asked for
+-- outright: every handheld this runs on has them, and the game reads each one
+-- -- the shoulders page through tabs and option cycles, the triggers tilt.
 local CORE_STEPS = {
     {control = 'a', cue = 'A', prompt = 'Press the button marked A'},
     {control = 'b', cue = 'B', prompt = 'Press the button marked B'},
     {control = 'x', cue = 'X', prompt = 'Press the button marked X'},
     {control = 'y', cue = 'Y', prompt = 'Press the button marked Y'},
-    {control = 'leftshoulder', cue = 'L1', prompt = 'Press the LEFT shoulder button',
-     optional = true},
-    {control = 'lefttrigger', cue = 'L2', prompt = 'Press the LEFT trigger',
-     optional = true},
-    {control = 'rightshoulder', cue = 'R1', prompt = 'Press the RIGHT shoulder button',
-     optional = true},
-    {control = 'righttrigger', cue = 'R2', prompt = 'Press the RIGHT trigger',
-     optional = true},
+    {control = 'leftshoulder', cue = 'L1', prompt = 'Press the LEFT shoulder button'},
+    {control = 'lefttrigger', cue = 'L2', prompt = 'Press the LEFT trigger'},
+    {control = 'rightshoulder', cue = 'R1', prompt = 'Press the RIGHT shoulder button'},
+    {control = 'righttrigger', cue = 'R2', prompt = 'Press the RIGHT trigger'},
 }
 
 -- Asked only when SDL has no mapping for the device at all, in which case none
@@ -73,7 +76,7 @@ local pad, base_mapping
 local steps, step_index = CORE_STEPS, 1
 local learned = {}
 local built_mapping
-local axis_rest, axis_held = {}, {}
+local axis_rest, axis_held, axis_pending = {}, {}, {}
 local cooldown, idle, message, message_timer = 0, 0, nil, 0
 local fonts, font_data
 
@@ -181,7 +184,7 @@ local function begin_steps()
 
     -- Triggers rest at one end of their travel rather than in the middle, so
     -- rest is whatever each axis reads before anything has been touched.
-    axis_rest, axis_held = {}, {}
+    axis_rest, axis_held, axis_pending = {}, {}, {}
     for i = 1, pad:getAxisCount() do axis_rest[i] = pad:getAxis(i) end
 
     step_index, learned = 1, {}
@@ -209,10 +212,7 @@ local function advance()
     if step_index > #steps then finish_steps() end
 end
 
--- `a3` and `+a3` are one physical axis written two ways.
-local function same_input(one, other)
-    return one:gsub('^[+-]', '') == other:gsub('^[+-]', '')
-end
+local same_input = mapping.conflict
 
 local function learned_input(control)
     for _, entry in ipairs(learned) do
@@ -230,15 +230,6 @@ end
 local function record(input)
     local step = steps[step_index]
     if not step then return end
-
-    -- Half the handhelds this runs on are missing a shoulder or a trigger, so
-    -- there has to be a way to say so. A is the button that is certain to exist
-    -- by the time any of those are asked for.
-    local a_input = learned_input('a')
-    if step.optional and a_input and same_input(input, a_input) then
-        next_step()
-        return
-    end
 
     for _, entry in ipairs(learned) do
         if same_input(entry.input, input) then
@@ -316,23 +307,45 @@ function love.keypressed(key)
     end
 end
 
+-- How the axis an answer arrived on should be written into the mapping.
+--
+-- A trigger that rests at one end of its travel is the whole axis: that is what
+-- tells SDL to read the resting end as "not pressed" and the far end as fully
+-- pressed. A trigger that rests in the middle -- and every stick and axis D-pad,
+-- which all do -- takes the half that was actually moved instead. Writing the
+-- second kind as a whole axis is what leaves a trigger reading half pressed
+-- while nothing is touching it, which the game sees as very nearly held down.
+local function axis_input(index, travel)
+    local step = state == 'prompt' and steps[step_index] or nil
+    local rest = axis_rest[index] or 0
+    if step and TRIGGERS[step.control] and math.abs(rest) > 0.5 then
+        return 'a' .. (index - 1)
+    end
+    return (travel > 0 and '+a' or '-a') .. (index - 1)
+end
+
+-- A button announces itself again on every press, so one that arrives during the
+-- cooldown after the previous answer is simply pressed again. An axis has no
+-- such event: it is read, and once it has been seen past the threshold it is not
+-- seen crossing it again until it goes back to rest. Dropping that crossing
+-- because the cooldown was still running is why a trigger held down from the
+-- moment the question appeared could seem not to register at all. Hold the
+-- crossing instead and answer with it when the cooldown ends, unless the axis
+-- returns to rest first, which means it was let go rather than kept pressed.
 local function poll_axes()
     if not pad then return end
-    local step = state == 'prompt' and steps[step_index] or nil
     for i = 1, pad:getAxisCount() do
         local travel = pad:getAxis(i) - (axis_rest[i] or 0)
-        if not axis_held[i] and math.abs(travel) > AXIS_TRAVEL then
+        if axis_held[i] and math.abs(travel) < AXIS_RETURN then
+            axis_held[i], axis_pending[i] = false, nil
+        elseif not axis_held[i] and math.abs(travel) > AXIS_TRAVEL then
             axis_held[i] = true
-            -- An analogue trigger is written as the whole axis, which is how
-            -- SDL knows to read its resting end as "not pressed". Everything
-            -- else takes the half of the axis that was actually moved.
-            if step and TRIGGERS[step.control] then
-                handle(pad, 'a' .. (i - 1))
-            else
-                handle(pad, (travel > 0 and '+a' or '-a') .. (i - 1))
-            end
-        elseif axis_held[i] and math.abs(travel) < AXIS_RETURN then
-            axis_held[i] = false
+            axis_pending[i] = travel
+        end
+        if axis_pending[i] and cooldown <= 0 then
+            local pending = axis_pending[i]
+            axis_pending[i] = nil
+            handle(pad, axis_input(i, pending))
         end
     end
 end
@@ -406,6 +419,28 @@ local function draw_progress(y)
     end
 end
 
+-- Whole seconds until this run gives up, or nil while that is far enough off to
+-- be worth saying nothing about. Which timeout is counting depends on the state,
+-- so this reads it back the same way love.update decides it.
+local function skip_countdown()
+    local timeout = IDLE_TIMEOUT
+    if state == 'intro' and #love.joystick.getJoysticks() == 0 then
+        timeout = NO_PAD_TIMEOUT
+    end
+    local left = timeout - idle
+    if left > SKIP_WARNING then return nil end
+    return math.max(0, math.ceil(left))
+end
+
+-- Any input at all puts idle back to zero, so this stays honest about what it
+-- takes to stop it: pressing something is the whole of it.
+local function draw_countdown(y)
+    local left = skip_countdown()
+    if not left then return end
+    centred(fonts.hint,
+        string.format('Skipping in %ds. Press anything to stay.', left), y, ACCENT)
+end
+
 function love.draw()
     local w, h = love.graphics.getDimensions()
     set_colour(BG)
@@ -416,8 +451,12 @@ function love.draw()
     if state == 'intro' then
         centred(fonts.body, 'Press any button to begin.', h*0.42, ACCENT)
         if #love.joystick.getJoysticks() == 0 then
-            centred(fonts.hint, 'No controller detected. Skipping shortly.', h*0.8, DIM)
+            -- Nothing to press, so the countdown is the whole of the message.
+            centred(fonts.hint, string.format(
+                'No controller detected. Skipping in %ds.', skip_countdown() or 0),
+                h*0.8, DIM)
         else
+            draw_countdown(h*0.7)
             centred(fonts.hint,
                 'Answer with the letters printed on your device.\n' ..
                 'Nothing is saved until you confirm at the end.', h*0.78, DIM)
@@ -429,11 +468,8 @@ function love.draw()
             y = centred(fonts.body, step.prompt, y + h*0.05)
             if message then
                 centred(fonts.hint, message, y + h*0.03, ACCENT)
-            elseif step.optional then
-                centred(fonts.hint,
-                    string.format('No %s on this device? Press A to skip it.',
-                        step.cue), y + h*0.03, DIM)
             end
+            draw_countdown(h*0.76)
             centred(fonts.hint,
                 string.format('%d of %d', step_index, #steps), h*0.85, DIM)
             draw_progress(h*0.93)
@@ -442,6 +478,9 @@ function love.draw()
         local y = centred(fonts.body, 'Buttons set.', h*0.28, TEXT)
         y = centred(fonts.body, 'Press START to save.', y + h*0.06, ACCENT)
         centred(fonts.body, 'Press SELECT to start over.', y)
+        -- Timing out here throws the answers away rather than saving them, so
+        -- the warning matters more on this screen than on any of the others.
+        draw_countdown(h*0.72)
         centred(fonts.hint,
             'START and SELECT are not changed by this setup, so they\n' ..
             'answer here the same as they always did.', h*0.8, DIM)
