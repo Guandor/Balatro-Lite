@@ -11,7 +11,7 @@ You need to own Balatro on Steam. The macOS or the Windows version is fine.
 
 - **Fills the screen.** The playfield takes your device's own aspect ratio and uses the whole panel, so everything is drawn noticeably larger.
 - **A layout built for a small screen.** The desktop sidebar becomes a single top status bar, the shop drops its oversized animated sign so the whole storefront fits on screen, and card descriptions are larger. The clearer Nunito font is used on every device.
-- **Runs lighter.** CRT, bloom, shadows, and screen shake are off, the two full-screen shaders are trimmed, and the animated background is cached instead of redrawn every frame.
+- **Runs lighter.** CRT, bloom, shadows, and screen shake are off, and the two full-screen shaders are trimmed. Reduced motion is on, which holds the background still, so it is drawn once into a buffer and reused until its colours change rather than recomputed every frame. The background is therefore a static image on this port, not the animated one.
 - **Buttons that match your device.** The first launch asks you to press each button by the letter printed beside it, and takes your device's word for which is which. Handhelds print those letters in either the Xbox or the Nintendo arrangement, and what a device reports doesn't always match what it has printed on it.
 
 
