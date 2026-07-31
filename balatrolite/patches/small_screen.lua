@@ -121,6 +121,98 @@ end
 -- Each of these is a per-frame cost on a handheld GPU: crt and bloom are
 -- full-screen shader work, shadows double every card's draw calls, and reduced
 -- motion drops the per-letter and per-card wobble.
+-- Stock ties the texture filter to the atlas choice: asking for the 1x sheets
+-- also switches sampling to nearest, and asking for 2x switches it to linear
+-- (Game:set_render_settings). That pairing assumes the small sheets are drawn at
+-- their own size. On a 480p panel they are not: the room puts 37.5 pixels in a
+-- tile, so a 71 pixel card sprite is drawn at about 77, and a card in the hand
+-- at 96. Nearest-neighbour magnification of a sprite that is both upscaled and
+-- rotated -- the hand fans its cards -- is what turns every edge into stairs. A
+-- 768p panel takes the 2x sheets, samples them down, and never shows it, which
+-- is why the same build looks clean on one device and ragged on another.
+--
+-- Keep the memory the small sheets save and take the smoothing back. Fonts get
+-- it too: they are built from the same default, one call later in Game:init.
+local function use_smooth_filtering()
+    love.graphics.setDefaultFilter('linear', 'linear', 1)
+    for _, set in ipairs({G.ASSET_ATLAS, G.ANIMATION_ATLAS}) do
+        for _, atlas in pairs(set or {}) do
+            if atlas.image then atlas.image:setFilter('linear', 'linear') end
+        end
+    end
+    for _, font in ipairs(G.FONTS or {}) do
+        if font.FONT then font.FONT:setFilter('linear', 'linear') end
+    end
+end
+
+local original_set_render_settings = Game.set_render_settings
+function Game:set_render_settings(...)
+    local result = original_set_render_settings(self, ...)
+    use_smooth_filtering()
+    return result
+end
+
+-- Text is the one thing smoothing alone does not rescue, and not for want of
+-- resolution -- it has far more than the panel can show. Every font is
+-- rasterized at ten tiles, 200 pixels a glyph, and then drawn at
+-- FONTSCALE/TILESIZE, which on this layout is about one tile of height per unit
+-- of text scale. A 480p panel puts 37.5 pixels in a tile, so ordinary label text
+-- lands between 11 and 30 pixels: a 200 pixel glyph squeezed into fifteen or so.
+-- Fonts carry no mipmaps, so each pixel is a two-by-two tap taken out of a glyph
+-- being minified seven to eighteen times, and undersampling at that ratio is
+-- what breaks up thin strokes and makes the letters look ragged.
+--
+-- So rasterize nearer the size they are actually drawn at. At five tiles the
+-- minification halves everywhere and still never turns into magnification: the
+-- largest text this layout draws is around 1.5 tiles, which is 90 pixels on a
+-- 768p panel against a 100 pixel glyph. The glyph atlas also costs a quarter of
+-- what it did.
+--
+-- Layout is untouched. FONTSCALE converts glyph pixels to tiles and TEXT_OFFSET
+-- is measured in glyph pixels, so both are compensated by the same factor the
+-- glyphs shrank by -- render_scale*FONTSCALE, which is what sets the on-screen
+-- size, comes out unchanged.
+--
+-- Lower this for sharper small text at the cost of softening the largest; 10 is
+-- what the game ships.
+local FONT_RASTER_TILES = 5
+
+local function retune_fonts()
+    if not G.FONTS then return end
+    local target = G.TILESIZE*FONT_RASTER_TILES
+    for _, font in ipairs(G.FONTS) do
+        -- Only ever downward: a font already rasterized below the target is
+        -- being sampled well enough, and rebuilding it larger would undo that.
+        if font.FONT and font.render_scale and font.render_scale > target and
+           font.file and love.filesystem.getInfo(font.file) then
+            local ok, rebuilt = pcall(love.graphics.newFont, font.file, target)
+            if ok and rebuilt then
+                local factor = font.render_scale/target
+                font.FONT = rebuilt
+                font.render_scale = target
+                font.FONTSCALE = font.FONTSCALE*factor
+                font.TEXT_OFFSET = {x = font.TEXT_OFFSET.x/factor,
+                                    y = font.TEXT_OFFSET.y/factor}
+            end
+        end
+    end
+end
+
+-- set_language rebuilds the whole table from the stock sizes, so the retune has
+-- to follow it rather than happen once.
+local original_set_language = Game.set_language
+function Game:set_language(...)
+    local result = original_set_language(self, ...)
+    retune_fonts()
+    return result
+end
+
+-- Once for what already exists: globals.lua builds G, and so loads every atlas
+-- and font, before this file is read. Nothing has drawn text yet at this point,
+-- so no glyph cache is left pointing at the fonts being replaced.
+retune_fonts()
+use_smooth_filtering()
+
 local original_start_up = Game.start_up
 function Game:start_up(...)
     local result = original_start_up(self, ...)
@@ -130,11 +222,17 @@ function Game:start_up(...)
     self.SETTINGS.screenshake = false
     self.SETTINGS.reduced_motion = true
 
-    -- Match the atlas to the render size rather than always paying for the 2x
-    -- sheets. A 480p panel draws cards at about 77 pixels wide, which is what
-    -- the 1x atlas already is, so the larger sheets only cost memory and
-    -- sampling bandwidth there. Saved so the reload happens once, not per boot.
-    local atlas = (love.graphics.getHeight() <= 540) and 1 or 2
+    -- The small sheets on every panel, not just the small ones: 26MB of texture
+    -- against 105MB, and the sampling bandwidth that goes with it. That is the
+    -- largest single saving available here, and on these GPUs it buys more than
+    -- the sharper art costs.
+    --
+    -- It is a real cost, though. A 768p panel draws a card about 123 pixels wide
+    -- against the 1x sheet's 71, and a card in the hand about 154 -- so the art
+    -- is magnified rather than sampled down, and the linear filtering above
+    -- smooths that rather than sharpening it. Set this back to 2 on a device
+    -- with frames to spare. Saved so the reload happens once, not per boot.
+    local atlas = 1
     if self.SETTINGS.GRAPHICS.texture_scaling ~= atlas then
         self.SETTINGS.GRAPHICS.texture_scaling = atlas
         self:set_render_settings()
