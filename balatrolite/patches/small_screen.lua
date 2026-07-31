@@ -166,10 +166,82 @@ local function compact_owned_jokers()
     G.jokers:hard_set_cards()
 end
 
+-- The hand is the one area with room to spare, and its cards are the ones
+-- actually being read. align_cards centres a card on the area's own middle, so
+-- growing the area's height alongside the card leaves the bottom edge within a
+-- few hundredths of where it was: the whole increase is spent upward, into the
+-- gap the play area sits in.
+--
+-- The ceiling is that gap. set_screen_positions parks the play area 3.6 above
+-- the hand, and it has to stay clear of the owned-card strip at RUN_OVERLAY_Y,
+-- which puts the limit around 1.36 on the 4:3 room -- the squattest this
+-- layout supports, and so the one that decides it. Jokers and consumables keep
+-- their own sizes; the strip they live in has no room to give.
+local HAND_CARD_SCALE = 1.25
+
+-- Except while a booster pack is open. That state lays the hand out at
+-- 1.8 card heights above the area instead of inside it, to raise the cards
+-- clear for selection, and at normal size that already reaches the underside of
+-- the owned-card strip. Scaling the cards scales the offset with them, so this
+-- one state keeps the size it was tuned for.
+local function hand_card_scale()
+    if G.STATE == G.STATES.TAROT_PACK or G.STATE == G.STATES.SPECTRAL_PACK or
+       G.STATE == G.STATES.PLANET_PACK then
+        return 1
+    end
+    return HAND_CARD_SCALE
+end
+
+local function resize_card(card, scale)
+    if not card then return end
+    local target_w = G.CARD_W*scale
+    local target_h = G.CARD_H*scale
+    if math.abs(card.T.w-target_w) > 0.001 or
+       math.abs(card.T.h-target_h) > 0.001 then
+        card:hard_set_T(nil, nil, target_w, target_h)
+    end
+end
+
+-- A card is only enlarged while it is in the hand. Playing, discarding or
+-- returning it to the deck puts it back first, so every other area keeps the
+-- dimensions it was laid out for -- the play area in particular is only 5.3
+-- cards wide and would start overlapping the scoring row.
+local function restore_played_card(card)
+    if not card or not card.small_screen_hand_sized then return end
+    card.small_screen_hand_sized = nil
+    resize_card(card, 1)
+end
+
+local function resize_hand_card(card, scale)
+    if not card then return end
+    resize_card(card, scale)
+    card.small_screen_hand_sized = (scale ~= 1) or nil
+end
+
+-- Cheap enough to check every frame, and it has to be: the scale depends on the
+-- state, and cards arrive in the hand throughout a round.
+local hand_scale_applied
+local function apply_hand_card_scale()
+    if not G.hand then return end
+    local scale = hand_card_scale()
+    if hand_scale_applied ~= scale then
+        hand_scale_applied = scale
+        G.hand.T.h = 0.95*G.CARD_H*scale
+        G.hand.card_w = G.CARD_W*scale
+    end
+    for _, card in ipairs(G.hand.cards) do resize_hand_card(card, scale) end
+end
+
 -- Newly purchased Jokers enter the existing area after start_run has completed.
 local original_cardarea_emplace = CardArea.emplace
 function CardArea:emplace(card, ...)
-    if self == G.jokers then resize_owned_joker(card) end
+    if self == G.jokers then
+        resize_owned_joker(card)
+    elseif self == G.hand then
+        resize_hand_card(card, hand_card_scale())
+    else
+        restore_played_card(card)
+    end
     return original_cardarea_emplace(self, card, ...)
 end
 
@@ -180,6 +252,8 @@ end
 local original_cardarea_move = CardArea.move
 function CardArea:move(dt)
     if self == G.hand then
+        -- Before the stock move reads T.h to decide where the hand sits.
+        apply_hand_card_scale()
         local room_h = G.TILE_H
         G.TILE_H = room_h - BOTTOM_INSET
         original_cardarea_move(self, dt)
@@ -388,6 +462,8 @@ end
 function set_screen_positions()
     if G.STAGE == G.STAGES.RUN then
         compact_owned_jokers()
+        -- Sets the hand's height, which every line below is measured against.
+        apply_hand_card_scale()
 
         G.deck.T.x = ROOM_W - G.deck.T.w - SAFE_MARGIN
         G.deck.T.y = ROOM_H - G.deck.T.h - BOTTOM_INSET
