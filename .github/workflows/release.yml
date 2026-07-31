@@ -1,0 +1,233 @@
+# Packages the port the way port.json describes it -- "Balatro Lite.sh" and the
+# balatrolite folder, nothing else -- and publishes it as a GitHub release.
+#
+# Run it either by pushing a tag (git tag v1.2.0 && git push origin v1.2.0) or
+# from the Actions tab, where it takes the version as an input and makes the tag
+# for you.
+#
+# Release notes are written from the commits since the previous tag. If the
+# repository has an OPENROUTER_API_KEY secret, those commits are sent to
+# OpenRouter and the reply is used instead. Every failure on that path -- no
+# key, a bad model name, a rate limit, a malformed reply -- falls back to the
+# plain commit list, so the release still goes out.
+#
+# Optional repository variable: OPENROUTER_MODEL, any model id OpenRouter
+# serves. The default below is only a default.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, for example v1.2.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out with history
+        uses: actions/checkout@v4
+        with:
+          # The notes are built from the range since the last tag, so the
+          # default shallow clone is not enough.
+          fetch-depth: 0
+
+      - name: Settle the version
+        id: version
+        env:
+          # Through the environment rather than inlined, so a version string
+          # cannot run as shell.
+          INPUT_VERSION: ${{ inputs.version }}
+          TAG_NAME: ${{ github.ref_name }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            version="$INPUT_VERSION"
+          else
+            version="$TAG_NAME"
+          fi
+          case "$version" in
+            v*) ;;
+            *)  version="v$version" ;;
+          esac
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+(\.[0-9]+)*([-.][0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$version' is not a version like v1.2.0"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing $version"
+
+      - name: Build the port archive
+        id: build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          staging="$(mktemp -d)"
+
+          # Exactly the two items port.json lists. The repo README stays behind;
+          # balatrolite.md is the copy that ships.
+          cp "Balatro Lite.sh" "$staging/"
+          cp -r balatrolite "$staging/"
+
+          # Anything a device or a local test run leaves behind. None of it is
+          # tracked, so this is belt and braces -- except the game itself, which
+          # must never be redistributed.
+          rm -rf "$staging/balatrolite/saves" "$staging/balatrolite/patch-work"
+          rm -f "$staging/balatrolite/log.txt" "$staging/balatrolite/Balatro_pm"
+          find "$staging/balatrolite" \
+            \( -iname '*.exe' -o -iname '*.love' \) -type f -delete
+
+          # PortMaster chmods bin/* itself, but the launcher has to be runnable
+          # before it can do that.
+          chmod +x "$staging/Balatro Lite.sh"
+          find "$staging/balatrolite/bin" -type f -exec chmod +x {} +
+
+          mkdir -p dist
+          name="balatrolite-$VERSION.zip"
+          out="$PWD/dist/$name"
+          ( cd "$staging" && zip -r -q "$out" "Balatro Lite.sh" balatrolite )
+
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "path=dist/$name" >> "$GITHUB_OUTPUT"
+          echo "Built $name ($(du -h "$out" | cut -f1))"
+          unzip -l "$out" | head -20
+
+      - name: Collect the commits since the last release
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # On a tag push the tag being released is already here, so exclude it
+          # to find the one before. On a manual run it does not exist yet and
+          # the newest tag is the right answer either way.
+          previous="$(git tag --sort=-creatordate | grep -Fxv "$VERSION" | head -n1 || true)"
+          if [ -n "$previous" ]; then
+            echo "Previous release: $previous"
+            git log --no-merges --pretty=format:'- %s%n%w(0,2,2)%b' "$previous..HEAD" > commits.txt
+          else
+            echo "No previous tag; using the whole history."
+            git log --no-merges --pretty=format:'- %s%n%w(0,2,2)%b' > commits.txt
+          fi
+          # git log writes no trailing newline.
+          printf '\n' >> commits.txt
+          if [ ! -s commits.txt ]; then
+            echo "- No changes recorded." > commits.txt
+          fi
+          wc -l < commits.txt | xargs echo "Commit lines:"
+
+      - name: Write the release notes
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4.5' }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ZIP_NAME: ${{ steps.build.outputs.name }}
+        run: |
+          set -uo pipefail
+
+          # Written first: it is both the fallback and the material the model is
+          # given, and it is only replaced once a reply has actually arrived.
+          {
+            echo "## Changes"
+            echo
+            cat commits.txt
+          } > notes.md
+
+          write_footer() {
+            {
+              echo
+              echo "## Install"
+              echo
+              echo "Download \`$ZIP_NAME\` and unzip it into your device's \`ports\` folder."
+              echo "You need to own Balatro; see the port's README for which file to copy in."
+            } >> notes.md
+          }
+
+          if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+            echo "No OPENROUTER_API_KEY secret; keeping the plain commit list."
+            write_footer
+            exit 0
+          fi
+
+          prompt='You are writing the release notes for Balatro Lite, a
+          PortMaster port of the game Balatro for Linux handheld consoles. The
+          user message holds the commits since the last release, each subject
+          followed by its body.
+
+          Write the notes as GitHub Markdown. Group related changes under short
+          headings such as Fixes, Performance and Interface, using only the
+          headings the changes actually call for. One bullet per user-visible
+          change, in plain language a player would understand, describing what
+          changed for them rather than which function was edited. Leave out
+          anything purely internal. Invent nothing that is not in the commits.
+          Do not add a title and do not add an install section.'
+
+          payload="$(jq -n \
+            --arg model "$OPENROUTER_MODEL" \
+            --arg system "$prompt" \
+            --arg commits "$(cat commits.txt)" \
+            '{
+              model: $model,
+              max_tokens: 1200,
+              messages: [
+                {role: "system", content: $system},
+                {role: "user", content: $commits}
+              ]
+            }')"
+
+          http=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
+            https://openrouter.ai/api/v1/chat/completions \
+            -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -H 'X-Title: Balatro Lite release notes' \
+            -d "$payload") || http=000
+
+          if [ "$http" != "200" ]; then
+            echo "::warning::OpenRouter returned $http; keeping the plain commit list."
+            head -c 500 response.json 2>/dev/null || true
+            write_footer
+            exit 0
+          fi
+
+          generated="$(jq -r '.choices[0].message.content // empty' response.json)"
+          if [ -z "$generated" ]; then
+            echo "::warning::OpenRouter reply had no content; keeping the plain commit list."
+            write_footer
+            exit 0
+          fi
+
+          printf '%s\n' "$generated" > notes.md
+          {
+            echo
+            echo "<details><summary>Commits</summary>"
+            echo
+            cat commits.txt
+            echo
+            echo "</details>"
+          } >> notes.md
+          echo "Notes written by $OPENROUTER_MODEL."
+          write_footer
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          ZIP_PATH: ${{ steps.build.outputs.path }}
+        run: |
+          set -euo pipefail
+          # --target matters only for a manual run, where the tag is made here.
+          gh release create "$VERSION" "$ZIP_PATH" \
+            --title "Balatro Lite $VERSION" \
+            --notes-file notes.md \
+            --target "$GITHUB_SHA"
