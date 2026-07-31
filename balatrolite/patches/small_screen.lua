@@ -903,8 +903,10 @@ function create_UIBox_HUD()
     -- Measured, not guessed: the numeric readouts are built with the en-us font
     -- whatever the profile language is, and the hand name uses the profile's.
     local numeric = G.LANGUAGES['en-us'].font
-    local score_row_h = text_height(SCORE_SCALE, numeric) + 0.04
-    local target_row_h = text_height(TARGET_SCALE) + 0.04
+    local score_text_h = text_height(SCORE_SCALE, numeric)
+    local score_row_h = score_text_h + 0.04
+    local target_text_h = text_height(TARGET_SCALE)
+    local target_row_h = target_text_h + 0.04
     local dollars_box_h = text_height(DOLLARS_SCALE, numeric) + 0.08
 
     -- Hand readout boxes. Each of these is a declared size: the row heights are
@@ -917,6 +919,15 @@ function create_UIBox_HUD()
     -- Every term here is declared, so this is the cell's height, not a budget
     -- it might exceed. All four cells take it, which keeps the panels level.
     local row_h = math.max(HUD_ROW_H, name_box_h + num_box_h + 0.06 + 0.09)
+
+    -- Score and requirement get the same treatment as the hand readouts: a
+    -- declared box that the number is fitted into, rather than a text node the
+    -- number sizes. See the score cell below for why. The requirement keeps the
+    -- profile's font, which is the one its row height has always been built for.
+    local score_text = FixedText(SCORE_TEXT_W, score_text_h,
+        {scale=SCORE_SCALE, font=numeric, colour=G.C.WHITE})
+    local target_text = FixedText(SCORE_TEXT_W, target_text_h,
+        {scale=TARGET_SCALE, colour=G.C.RED})
 
     local hand_line_text = FixedText(name_box_w, name_box_h,
         {scale=HAND_TEXT_SCALE, gap=0.1})
@@ -933,22 +944,32 @@ function create_UIBox_HUD()
     -- Score and requirement belong to each other: the number you have over the
     -- number you need. Both readouts fit themselves to SCORE_TEXT_W, so a seven
     -- digit score cannot widen the cell and push the bar past the margins.
+    --
+    -- The score is an object rather than a text node. A text node is measured
+    -- from its own string, and this one carries no_recalc so that a growing
+    -- score cannot re-lay-out the whole bar every time it ticks -- which also
+    -- means its box keeps whatever width the first value happened to need. Past
+    -- four or five digits the number simply drew past that box, and since the
+    -- text is laid out from the box's left edge, a number narrower than the box
+    -- sat off to one side instead of in the middle of it. FixedText owns a
+    -- declared box, centres inside it, and scales the number down when it would
+    -- otherwise run past the edge, which is all three complaints at once.
     local score = {n=G.UIT.C, config={
         id='row_dollars_chips', align='cm', minw=HUD_SCORE_W, minh=row_h,
         padding=0.06, r=0.1, colour=panel, emboss=0.05
     }, nodes={
         {n=G.UIT.R, config={align='cm', minw=HUD_SCORE_W-0.12, minh=score_row_h,
             r=0.08, colour=inset}, nodes={
-            {n=G.UIT.T, config={ref_table=G.GAME, ref_value='chips_text',
-                lang=G.LANGUAGES['en-us'], scale=SCORE_SCALE, colour=G.C.WHITE,
-                id='chip_UI_count', func='chip_UI_set', shadow=true,
-                no_recalc=true}}
+            {n=G.UIT.O, config={id='chip_UI_count', w=SCORE_TEXT_W,
+                h=score_text_h, object=score_text, func='chip_UI_set'}}
         }},
+        -- No ref_table here: UIElement:update_object treats one on an object
+        -- node as the source of the object itself, and would swap the readout
+        -- for the string. The func feeds it instead.
         {n=G.UIT.R, config={align='cm', minh=target_row_h}, nodes={
-            {n=G.UIT.T, config={id='small_screen_blind_target',
-                ref_table={val=''}, ref_value='val', scale=TARGET_SCALE,
-                colour=G.C.RED, shadow=true, func='small_screen_blind_target',
-                no_recalc=true}}
+            {n=G.UIT.O, config={id='small_screen_blind_target', w=SCORE_TEXT_W,
+                h=target_text_h, object=target_text,
+                func='small_screen_blind_target'}}
         }}
     }}
 
@@ -1119,29 +1140,27 @@ end
 -- the blind itself, so this only decides when it is meaningful to show. A slash
 -- rather than a localized "score at least": the cell is 2.6 tiles wide, and the
 -- number has to stay the thing you read.
+-- Runs every frame, so the comparison earns its keep: set_text builds a table
+-- per call, and the requirement only changes when the blind does.
 G.FUNCS.small_screen_blind_target = function(e)
     local blind = G.GAME.blind
     local active = blind and blind.blind_set and blind.name and blind.name ~= ''
     local text = active and ('/ '..(blind.chip_text or '')) or ''
     if e.small_screen_target_text == text then return end
     e.small_screen_target_text = text
-    e.config.ref_table.val = text
-    e.config.scale = fit_scale(text, SCORE_TEXT_W,
-        (e.config.lang or G.LANG).font, TARGET_SCALE)
+    e.config.object:set_text(text)
 end
 
--- scale_number keeps the round score roughly six characters wide, which the
--- desktop sidebar has room for and this cell does not. Cap it by measurement so
--- the number shrinks to its box instead of the box growing into the margin.
+-- The stock func keeps G.GAME.chips_text current and picks a scale from the
+-- score's magnitude; the scale lands on a field FixedText ignores, since it
+-- measures the string against its own box instead. Feeding it the string is all
+-- that is left to do here.
 local original_chip_UI_set = G.FUNCS.chip_UI_set
 G.FUNCS.chip_UI_set = function(e)
-    local previous = G.GAME.chips_text
     original_chip_UI_set(e)
-    if e.small_screen_chip_text ~= G.GAME.chips_text or
-       previous ~= G.GAME.chips_text then
+    if e.small_screen_chip_text ~= G.GAME.chips_text then
         e.small_screen_chip_text = G.GAME.chips_text
-        e.config.scale = fit_scale(G.GAME.chips_text, SCORE_TEXT_W,
-            (e.config.lang or G.LANG).font, e.config.scale)
+        e.config.object:set_text(G.GAME.chips_text)
     end
 end
 
