@@ -840,6 +840,41 @@ function G.UIDEF.shop()
     }}
 end
 
+-- Set when the shop's slot count changes, cleared once the panel has been laid
+-- out again from where it actually sits. Read by Game:update_shop below.
+local shop_needs_relayout = false
+
+-- Overstock and Overstock Plus are the only things that change the number of
+-- shop slots, and change_shop_size does it by widening the card area in place
+-- and calling G.shop:recalculate().
+--
+-- calculate_xywh writes absolute room coordinates into every element from the
+-- box's position at that moment, and the shop is redeemed from while the panel
+-- is still sliding in -- the entrance runs from below the room up to its resting
+-- place. So the panel gets rebuilt around a position it is only passing through,
+-- and the elements are left where it was rather than where it ends up. On this
+-- layout that strands them below the room: plates, both buttons, everything but
+-- the cards, which are drawn from G.I.CARD independently of the panel.
+--
+-- The buttons stop responding for the same reason rather than a second one.
+-- Controller:process_registry only dispatches a registered button while its node
+-- is inside the room, so a button sitting below it silently swallows the press
+-- and the shop cannot be left.
+--
+-- Nothing is wrong with the layout itself, only with when it is measured. Defer
+-- it: Game:update_shop pins the panel to its resting place every frame, so let
+-- the slot change happen and lay the panel out on the next frame, from there.
+local original_change_shop_size = change_shop_size
+function change_shop_size(mod)
+    original_change_shop_size(mod)
+    if G.shop and G.shop_jokers then
+        -- change_shop_size writes the stock game's slot width; restore this
+        -- layout's own spacing before the shelf is measured against it.
+        G.shop_jokers.T.w = G.GAME.shop.joker_max*1.05*G.CARD_W
+        shop_needs_relayout = true
+    end
+end
+
 -- Retain the stock blind cards and callbacks, but give the selector the full room
 -- width and a hard vertical budget below the owned-card strip. The prompt remains
 -- in the HUD's blind cell, scaled to that cell instead of spilling across the bar.
@@ -1211,10 +1246,16 @@ end
 -- vertically, and everything left of the deck horizontally, so it is never
 -- crowded against the card stack. Measured once per shop so the pin cannot
 -- jitter, and it falls back to the top of the band if the panel is oversized.
-local shop_pin_box, shop_pin_x, shop_pin_y
+local shop_pin_box, shop_pin_x, shop_pin_y, shop_pin_w, shop_pin_h
 local function shop_pin()
-    if G.shop ~= shop_pin_box then
+    -- Keyed on the panel's size as well as its identity: a panel that changed
+    -- shape needs centring again, and measuring it once was only ever meant to
+    -- stop the pin jittering frame to frame.
+    if G.shop ~= shop_pin_box or
+       (G.shop and (G.shop.T.w ~= shop_pin_w or G.shop.T.h ~= shop_pin_h)) then
         shop_pin_box, shop_pin_x, shop_pin_y = G.shop, nil, nil
+        shop_pin_w = G.shop and G.shop.T.w
+        shop_pin_h = G.shop and G.shop.T.h
     end
     if not shop_pin_y then
         local w = (G.shop and G.shop.T.w) or 0
@@ -1242,6 +1283,17 @@ function Game:update_shop(dt)
     if G.shop then
         local x, y = shop_pin()
         pin_run_overlay(G.shop, y, x)
+        -- Only now, with the panel at the position it will keep, is it worth
+        -- measuring: recalculate bakes absolute coordinates into every element,
+        -- so doing it from anywhere else strands them there.
+        if shop_needs_relayout then
+            shop_needs_relayout = false
+            G.shop:recalculate()
+            -- The pin is derived from the panel's size, which recalculate may
+            -- have just changed, so take it again for the new shape.
+            x, y = shop_pin()
+            pin_run_overlay(G.shop, y, x)
+        end
     end
     if G.SHOP_SIGN then G.SHOP_SIGN.states.visible = false end
     return result
