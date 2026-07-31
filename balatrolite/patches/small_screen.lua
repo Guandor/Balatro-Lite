@@ -1512,6 +1512,48 @@ end
 
 -- Mark card descriptions for the engine-wide popup clamp, especially the leftmost
 -- shop slot, top-row Jokers, and rightmost consumable.
+-- A card with extra properties -- an edition, a seal, an enhancement, a Joker
+-- whose text cites another card -- describes each of them in its own small
+-- panel. show_infotip hangs those off the left of the description box, as a
+-- separate UIBox parented to it, and that is the one piece of the popup nothing
+-- clamps: UIBox:move only pulls instance_type POPUP back inside the room, which
+-- is the description box and not its children. A description sitting near the
+-- left margin therefore pushes its panels straight off the screen.
+--
+-- Stack them under the description instead of beside it, and do it by moving
+-- them into the description's own column rather than by re-aligning the box
+-- they live in. Inside a container the layout engine stacks R nodes vertically,
+-- and every info panel is one, so appending them puts each under the last. The
+-- popup then measures its own full height and the room clamp covers all of it,
+-- which the side panel never got.
+local function stack_info_boxes(node)
+    if type(node) ~= 'table' then return false end
+    if node.config and node.config.func == 'show_infotip' and
+       type(node.config.ref_table) == 'table' and node.nodes then
+        for _, box in ipairs(node.config.ref_table) do
+            node.nodes[#node.nodes + 1] = box
+        end
+        -- show_infotip builds the side panel only while this is set, so
+        -- clearing it is what stops the panels being shown twice.
+        node.config.ref_table = nil
+        return true
+    end
+    if node.nodes then
+        for _, child in pairs(node.nodes) do
+            if stack_info_boxes(child) then return true end
+        end
+    end
+    return false
+end
+
+local original_card_h_popup = G.UIDEF.card_h_popup
+G.UIDEF.card_h_popup = function(...)
+    -- Returns nothing for a card with no ability table yet.
+    local definition = original_card_h_popup(...)
+    if type(definition) == 'table' then pcall(stack_info_boxes, definition) end
+    return definition
+end
+
 local original_align_h_popup = Card.align_h_popup
 function Card:align_h_popup(...)
     local result = original_align_h_popup(self, ...)
