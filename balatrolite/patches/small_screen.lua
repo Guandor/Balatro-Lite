@@ -1679,3 +1679,110 @@ function Sprite:draw(overlay)
     return draw_cached_background(self)
 end
 end
+
+-- Garbage collection paced against allocation rather than against the clock.
+--
+-- Balatro drives the collector by hand: every frame Game:update calls
+-- nuGC(nil, nil, true), which spends a fixed 0.3ms of wall clock taking
+-- collectgarbage('step', 1) increments, switches automatic collection off, and
+-- forces a full collect only once the heap passes 300MB.
+--
+-- The slice is the problem. 0.3ms buys hundreds of steps on the desktop the
+-- number was chosen on and a small fraction of that on a handheld CPU, while
+-- the allocation behind it does not shrink to match: DynaText builds a fresh
+-- love.graphics.newText for every letter each time its string changes, and in
+-- a run the score, the chips, the mult and the money change constantly. Once a
+-- frame allocates more than its slice can collect, the shortfall carries to the
+-- next frame and never comes back. The heap climbs for the rest of the run,
+-- every collection step has more to walk, and the frame rate sags with it --
+-- until the 300MB net finally trips and stops the game dead for a moment, or
+-- the player returns to the main menu, where delete_run drops the run's objects
+-- in one go and the collector catches up. That the menu fixes it is the tell.
+--
+-- Sizing the step to what the frame actually allocated keeps the heap level on
+-- any CPU: a slow device simply asks for a larger step. Automatic collection
+-- stays off, so collection still happens at one predictable point in the frame
+-- rather than wherever an allocation trips it, which is what the stock design
+-- wanted. The ceilings below are only backstops now that the pacing does the
+-- work, and they sit low enough that hitting one is not a visible stall on a
+-- device with a handheld's memory.
+if PERF_OPTIMIZATIONS then
+-- Enough of a step that an idle frame still makes progress, and a cap so one
+-- spike -- loading a run, opening the collection -- is caught up over several
+-- frames instead of stalling the frame it happened on.
+local GC_MIN_STEP_KB = 16
+local GC_MAX_STEP_KB = 1024
+-- Above this the collector is told to outpace allocation and bring the heap
+-- back down; above the hard one it gives up on incremental and sweeps.
+local GC_SOFT_CEILING_KB = 128*1024
+local GC_HARD_CEILING_KB = 224*1024
+
+local gc_previous_heap = collectgarbage('count')
+
+function nuGC(_, memory_ceiling, disable_otherwise)
+    local heap = collectgarbage('count')
+
+    -- What this frame added. Negative when the last step collected more than
+    -- was allocated, which is the state worth staying in.
+    local allocated = heap - gc_previous_heap
+    local step = allocated > GC_MIN_STEP_KB and allocated or GC_MIN_STEP_KB
+    if heap > GC_SOFT_CEILING_KB then step = step*3 end
+    if step > GC_MAX_STEP_KB then step = GC_MAX_STEP_KB end
+    collectgarbage('step', step)
+
+    if heap > (memory_ceiling and memory_ceiling*1024 or GC_HARD_CEILING_KB) then
+        collectgarbage('collect')
+    end
+    if disable_otherwise then collectgarbage('stop') end
+
+    -- Read back after collecting, so next frame measures allocation and not
+    -- what this one just reclaimed.
+    gc_previous_heap = collectgarbage('count')
+end
+end
+
+-- Optional readout for diagnosing a slowdown, off unless the launcher asks for
+-- it. The two numbers that matter sit side by side: heap is what the collector
+-- is keeping up with, and objects is how many live things every frame has to
+-- walk -- Game:update iterates G.MOVEABLES twice and the stage's object list
+-- once. A heap that climbs while objects holds steady is collection falling
+-- behind; objects climbing is something being created during the run and never
+-- removed, which is a different bug in a different place.
+if os.getenv('BALATRO_PM_PERF_HUD') == '1' then
+local hud_font
+local hud_frames, hud_elapsed, hud_fps = 0, 0, 0
+local hud_line = ''
+
+local original_game_draw_hud = Game.draw
+function Game:draw(...)
+    local result = original_game_draw_hud(self, ...)
+
+    hud_frames = hud_frames + 1
+    hud_elapsed = hud_elapsed + (G.real_dt or 0)
+    if hud_elapsed >= 0.5 then
+        hud_fps = hud_frames/hud_elapsed
+        hud_frames, hud_elapsed = 0, 0
+        hud_line = string.format(
+            'fps %.0f  heap %.0fMB  moveables %d  stage %d  cards %d',
+            hud_fps, collectgarbage('count')/1024, #G.MOVEABLES,
+            #(G.STAGE_OBJECTS[G.STAGE] or {}), #(G.I.CARD or {}))
+    end
+    if hud_line == '' then return result end
+
+    -- Drawn after the frame has been presented, where the canvas and shader are
+    -- already cleared, so this cannot disturb anything the game drew.
+    hud_font = hud_font or love.graphics.newFont(12)
+    love.graphics.push()
+    love.graphics.origin()
+    love.graphics.setShader()
+    love.graphics.setFont(hud_font)
+    local w = hud_font:getWidth(hud_line) + 8
+    local h = hud_font:getHeight() + 4
+    love.graphics.setColor(0, 0, 0, 0.65)
+    love.graphics.rectangle('fill', 0, 0, w, h)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.print(hud_line, 4, 2)
+    love.graphics.pop()
+    return result
+end
+end

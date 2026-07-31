@@ -61,6 +61,13 @@ TRIM_SHADERS=1
 PERF_OPTIMIZATIONS=1
 export BALATRO_PM_PERF_OPTIMIZATIONS="$PERF_OPTIMIZATIONS"
 
+# Set to 1 to draw a small readout in the top-left corner: frame rate, Lua heap
+# size, and how many live objects each frame has to walk. Worth turning on if
+# the game slows down over a long run -- a climbing heap and a climbing object
+# count have different causes and different fixes.
+PERF_HUD=0
+export BALATRO_PM_PERF_HUD="$PERF_HUD"
+
 # Which physical button is A is decided by the handheld, not by the game. Some
 # devices print the Xbox arrangement and some the Nintendo one, and the SDL
 # mapping a device ships with does not always agree with its own case lettering,
