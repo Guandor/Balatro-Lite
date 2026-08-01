@@ -4,7 +4,7 @@ A [PortMaster](https://portmaster.games/) port of [Balatro](https://www.playbala
 
 **This is not the game itself.** It is the wrapper that makes a copy you already own run on a handheld: you buy Balatro on Steam, copy one file from it onto your device, and this patches and launches it there. Nothing here works without that file, and the game is never distributed with it.
 
-There is already [a Balatro port for PortMaster](https://portmaster.games/detail.html?name=balatro), by nkahoang, which this one is built on — thank you. Balatro Lite is a variant of it aimed at smaller and slower devices: it trades visual effects for frame rate, and rebuilds the layout so a small panel shows a screen designed for it rather than a shrunken desktop one. It installs alongside the original and keeps its own saves, so you can have both and switch between them if you just want to try.
+There was already a Balatro port for PortMaster, by nkahoang, which this one is built on — thank you. Balatro Lite is a variant of it aimed at smaller and slower devices: it trades visual effects for frame rate, and rebuilds the layout so a small panel shows a screen designed for it rather than a shrunken desktop one. It installs alongside the original and keeps its own saves, so you can have both and switch between them if you just want to try.
 
 ## What's different
 
