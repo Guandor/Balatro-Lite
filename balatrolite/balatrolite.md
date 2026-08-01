@@ -1,11 +1,10 @@
 # Balatro Lite
 
-[Balatro](https://www.playbalatro.com/), the poker-inspired roguelike deck builder, with an interface rebuilt for handheld screens.
+A [PortMaster](https://portmaster.games/) port of [Balatro](https://www.playbalatro.com/) — the poker-inspired roguelike deck builder — with its interface rebuilt for the small screens of Linux handhelds.
 
-This installs alongside the original Balatro port and keeps its own saves, so you can run either one.
-Thanks to nkahoang for making [the original Balatro port](https://portmaster.games/detail.html?name=balatro).
+**This is not the game itself.** It is the wrapper that makes a copy you already own run on a handheld: you buy Balatro on Steam, copy one file from it onto your device, and this patches and launches it there. Nothing here works without that file, and the game is never distributed with it.
 
-You need to own Balatro on Steam. The macOS or the Windows version is fine.
+There is already [a Balatro port for PortMaster](https://portmaster.games/detail.html?name=balatro), by nkahoang, which this one is built on — thank you. Balatro Lite is a variant of it aimed at smaller and slower devices: it trades visual effects for frame rate, and rebuilds the layout so a small panel shows a screen designed for it rather than a shrunken desktop one. It installs alongside the original and keeps its own saves, so you can have both and switch between them if you just want to try.
 
 ## What's different
 
@@ -14,17 +13,7 @@ You need to own Balatro on Steam. The macOS or the Windows version is fine.
 - **Runs lighter.** CRT, bloom, shadows, and screen shake are off, and the two full-screen shaders are trimmed. Reduced motion is on, which holds the background still, so it is drawn once into a buffer and reused until its colours change rather than recomputed every frame. The background is therefore a static image on this port, not the animated one.
 - **Buttons that match your device.** The first launch asks you to press each button by the letter printed beside it, and takes your device's word for which is which. Handhelds print those letters in either the Xbox or the Nintendo arrangement, and what a device reports doesn't always match what it has printed on it.
 
-
 In short, it's uglier, but it runs better and fits small screens better.
-
-## Installation
-
-1. Buy the game on [Steam](https://store.steampowered.com/app/2379780/Balatro/).
-2. Copy the files into your ports folder.
-3. Copy your game file into the `balatrolite` folder — it needs its own copy even if you already have the original port installed:
-   - **Windows:** Steam → right-click Balatro → Manage → Browse Local Files. Copy `Balatro.exe`.
-   - **macOS:** Steam → right-click Balatro → Manage → Browse Local Files. Right-click `Balatro.app` → Show Package Contents → `Contents/Resources`. Copy `Balatro.love`.
-4. Launch it. The first start builds a patched copy called `Balatro_pm`, which takes a moment.
 
 ## Screenshots
 
@@ -32,8 +21,26 @@ In short, it's uglier, but it runs better and fits small screens better.
 ![Playing a hand](https://i.imgur.com/QPrUJBH.jpeg)
 ![The shop](https://i.imgur.com/QRXpMAK.jpeg)
 
+## What you need
 
+- **A handheld running [PortMaster](https://portmaster.games/).** Balatro Lite is a PortMaster port and does not run without it. If your device doesn't have PortMaster yet, install that first.
+- **Your own copy of Balatro**, bought on [Steam](https://store.steampowered.com/app/2379780/Balatro/). The Windows or the macOS build is equally fine — you copy a single file out of it.
 
+## Installing
+
+**1. Download the port.** Get the latest `balatrolite-vX.Y.Z.zip` from the [Releases page](https://github.com/Guandor/Balatro-Lite/releases). Balatro Lite isn't in PortMaster's built-in port list, so it is installed by hand — either route below does it.
+
+**2. Install it, either way:**
+
+- **Let PortMaster do it.** Copy the zip, still zipped, into PortMaster's `autoinstall` folder. It sits somewhere like `/roms/ports/autoinstall/`, though the exact path varies by device and firmware. Then open PortMaster, and it installs the port for you.
+- **Or unpack it yourself.** Unzip it and copy both `Balatro Lite.sh` and the `balatrolite` folder into your device's `ports` folder, commonly `/roms/ports/`, keeping the two side by side.
+
+**3. Add your game file.** Copy it into the `balatrolite` folder. It needs its own copy even if you already have the original port installed:
+
+- **Windows:** Steam → right-click Balatro → Manage → Browse Local Files. Copy `Balatro.exe`.
+- **macOS:** Steam → right-click Balatro → Manage → Browse Local Files. Right-click `Balatro.app` → Show Package Contents → `Contents/Resources`. Copy `Balatro.love`.
+
+**4. Launch it** from your device's ports menu. The first start builds a patched copy called `Balatro_pm`, which takes a moment. Later launches skip that.
 
 ## Buttons
 

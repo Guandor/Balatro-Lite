@@ -226,8 +226,15 @@ jobs:
               echo
               echo "## Install"
               echo
-              echo "Download \`$ZIP_NAME\` and unzip it into your device's \`ports\` folder."
-              echo "You need to own Balatro; see the port's README for which file to copy in."
+              echo "Requires [PortMaster](https://portmaster.games/) and your own copy of Balatro."
+              echo
+              echo "Download \`$ZIP_NAME\`, then either:"
+              echo
+              echo "- copy it, still zipped, into PortMaster's \`autoinstall\` folder and open PortMaster, or"
+              echo "- unzip it into your device's \`ports\` folder."
+              echo
+              echo "Either way, then copy your Balatro game file into the \`balatrolite\` folder."
+              echo "See the README for which file that is."
             } >> notes.md
           }
 
