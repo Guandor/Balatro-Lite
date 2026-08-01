@@ -106,6 +106,10 @@ end
 -- display because the room and the panel share an aspect ratio.
 local original_init_window = Game.init_window
 function Game:init_window(...)
+    local windows_runner = os.getenv('BALATRO_PM_WINDOWS_WINDOWED') == '1'
+    if windows_runner then
+        self.SETTINGS.WINDOW.screenmode = 'Windowed'
+    end
     local result = original_init_window(self, ...)
     self.ROOM_PADDING_W = 0
     self.ROOM_PADDING_H = 0
@@ -114,6 +118,18 @@ function Game:init_window(...)
     self.window_prev.w = self.WINDOWTRANS.w*self.TILESIZE*self.TILESCALE
     self.window_prev.h = self.WINDOWTRANS.h*self.TILESIZE*self.TILESCALE
     self.window_prev.orig_ratio = self.WINDOWTRANS.w/self.WINDOWTRANS.h
+    if windows_runner then
+        love.window.updateMode(
+            tonumber(os.getenv('BALATRO_PM_WINDOWS_WIDTH')) or 1024,
+            tonumber(os.getenv('BALATRO_PM_WINDOWS_HEIGHT')) or 768,
+            {
+                fullscreen = false,
+                resizable = true,
+                vsync = self.SETTINGS.WINDOW.vsync or 1,
+                display = self.SETTINGS.WINDOW.selected_display or 1,
+            }
+        )
+    end
     return result
 end
 
@@ -193,6 +209,7 @@ local function retune_fonts()
                 font.FONTSCALE = font.FONTSCALE*factor
                 font.TEXT_OFFSET = {x = font.TEXT_OFFSET.x/factor,
                                     y = font.TEXT_OFFSET.y/factor}
+                font.GLYPH_PX_SCALE = factor
             end
         end
     end
@@ -207,9 +224,40 @@ function Game:set_language(...)
     return result
 end
 
+-- Layout is untouched only for the numbers the retune actually compensates.
+-- DynaText's config mixes two kinds: scale multiplies a measured glyph width, so
+-- the smaller raster and the larger FONTSCALE cancel; spacing, x_offset and
+-- y_offset are constants in the font's own glyph pixels, and FONTSCALE scales
+-- them with nothing to cancel against. Every one of them therefore grows by the
+-- factor the glyphs shrank by.
+--
+-- The round evaluation panel is where that becomes visible rather than merely
+-- loose. Its dotted divider is 38 dots at 13.5 spacing, which measures 11.5
+-- tiles at the stock raster -- just inside the panel's width -- and 18.5 tiles
+-- after the retune. The row is what the panel is then sized to, so the whole
+-- cash-out screen is drawn wider than the room and runs off the display.
+--
+-- So divide the factor back out where those constants enter, and the retune
+-- stays invisible to layout. Recorded on the config table because a definition
+-- built from a table that outlives its first DynaText would otherwise be
+-- divided again on every rebuild.
+local original_dynatext_init = DynaText.init
+function DynaText:init(config)
+    config = config or {}
+    local font = config.font or G.LANG.font
+    local factor = font and font.GLYPH_PX_SCALE
+    if factor and not config.small_screen_glyph_px then
+        config.small_screen_glyph_px = true
+        if config.spacing then config.spacing = config.spacing/factor end
+        if config.x_offset then config.x_offset = config.x_offset/factor end
+        if config.y_offset then config.y_offset = config.y_offset/factor end
+    end
+    return original_dynatext_init(self, config)
+end
+
 -- Once for what already exists: globals.lua builds G, and so loads every atlas
--- and font, before this file is read. Nothing has drawn text yet at this point,
--- so no glyph cache is left pointing at the fonts being replaced.
+-- before this file is read. The fonts are built later, in Game:set_language,
+-- and are caught by the wrapper above.
 retune_fonts()
 use_smooth_filtering()
 
