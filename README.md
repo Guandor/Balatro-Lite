@@ -17,9 +17,10 @@ In short, it's uglier, but it runs better and fits small screens better.
 
 ## Screenshots
 
-![Blind selection](https://i.imgur.com/41sCbHl.jpeg)
-![Playing a hand](https://i.imgur.com/QPrUJBH.jpeg)
-![The shop](https://i.imgur.com/QRXpMAK.jpeg)
+![Blind selection](https://i.imgur.com/BwBf3np.png)
+![Playing a hand](https://i.imgur.com/CC7sXXT.png)
+![Cash out screen](https://i.imgur.com/6KifAYM.png)
+![The shop](https://i.imgur.com/CXNEGZU.png)
 
 ## What you need
 
