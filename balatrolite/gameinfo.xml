@@ -5,7 +5,7 @@
     <name>Balatro Lite</name>
     <desc>Balatro is a poker-inspired roguelike deck builder all about creating powerful synergies and winning big. This build rebuilds the interface for handheld screens and lightens the render path for lower-powered devices.</desc>
     <image>./balatrolite/cover.png</image>
-    <releasedate>20260802T000000</releasedate>
+    <releasedate>20240220T000000</releasedate>
     <developer>LocalThunk</developer>
     <publisher>LocalThunk</publisher>
     <genre>Card</genre>
