@@ -9,7 +9,7 @@
     "attr": {
         "title": "Balatro Lite",
         "porter": [
-            "nkahoang"
+            "nkahoang", "Guandor"
         ],
         "desc": "Balatro is a poker-inspired roguelike deck builder all about creating powerful synergies and winning big. This build rebuilds the interface for handheld screens and lightens the render path for lower-powered devices. It installs alongside the original Balatro port and keeps its own saves.",
         "inst": "Purchase the game from Steam: https://store.steampowered.com/app/2379780/Balatro/. On macOS, copy Balatro.love from Balatro.app/Contents/Resources into the balatrolite folder. On Windows, copy Balatro.exe into the balatrolite folder. This port uses its own folder and its own saves, so the copy is needed even if you already have the original Balatro port installed. The launcher keeps that file and builds a patched copy named Balatro_pm next to it; delete Balatro_pm whenever you want it rebuilt.",
