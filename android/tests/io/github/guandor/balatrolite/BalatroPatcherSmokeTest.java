@@ -59,6 +59,8 @@ public final class BalatroPatcherSmokeTest {
                 "performance-on defaults missing");
             require(read(archive, "main.lua").contains("G.FPS_CAP = G.FPS_CAP or 500"),
                 "main.lua should leave the frame cap to perf.lua");
+            require(read(archive, "conf.lua").contains("t.externalstorage = true"),
+                "Android external save storage is not enabled");
         }
 
         BalatroPatcher.patchGame(

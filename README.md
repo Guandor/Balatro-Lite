@@ -34,7 +34,8 @@ In short, it's uglier, but it runs better and fits small screens better.
 
 1. Download and install `balatrolite-vX.Y.Z.apk` from the [Releases page](https://github.com/Guandor/Balatro-Lite/releases).
 2. Launch **Balatro Lite** and choose `Balatro.exe` from a copy you own. `Balatro.love` from the macOS build is accepted too.
-3. Wait while the file is verified and patched on your device. Later launches start the game directly; APK updates rebuild the patch from the private imported original.
+3. Choose the port settings. To bring over your Steam save, put `meta.jkr`, `profile.jkr`, and `save.jkr` in a ZIP and choose **Import Save (.zip)**. This replaces profile 1.
+4. Wait while the file is verified and patched on your device. Later launches start the game directly; APK updates rebuild the patch from the private imported original.
 
 The APK contains the LÖVE runtime and Balatro Lite patch only. Your selected game stays in the app's private storage and is deleted if you clear the app's data or uninstall it.
 

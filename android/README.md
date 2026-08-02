@@ -9,13 +9,23 @@ result with LÖVE.
 After the game file is accepted, the first launch asks which screen layout to
 use and whether to enable the performance changes. Those answers are stored in
 the app's private preferences and determine how the imported archive is built.
+To bring over a Steam save, put `meta.jkr`, `profile.jkr`, and `save.jkr` in a
+ZIP and choose **Import Save (.zip)**. This replaces profile 1.
+
 The game's Options menu includes **Initialize Port Settings**; selecting it
 marks setup to run again when the app is next started.
 
 The selected game and patched `.love` archive stay in the app's private storage.
-They are never uploaded or added to the APK. An app update rebuilds the patch
-from the private original automatically. Clearing the app's storage (or
-uninstalling it) removes both and makes the importer ask again.
+They are never uploaded or added to the APK. Saves are written to the app's
+external files directory at
+`Android/data/io.github.guandor.balatrolite/files/save/balatro-lite/`. The first
+release using that directory copies any saves from the former private location
+without overwriting files already present there. Android 11 and newer may still
+restrict which file managers can browse `Android/data`.
+
+An app update rebuilds the patch from the private original automatically.
+Clearing the app's storage or uninstalling it removes the imported game and may
+also remove the app-specific external save directory, depending on the device.
 
 ## Supported game
 

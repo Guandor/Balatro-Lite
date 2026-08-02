@@ -397,10 +397,10 @@ jobs:
           commits or the diffs. Do not add a title and do not add an install
           section.'
 
-          # --rawfile rather than --arg "$(cat ...)": at diff sizes the command
-          # substitution is both an argv-length risk and a silent edit, since it
-          # strips the trailing newlines off the last hunk.
-          payload="$(jq -n \
+          # Keep both the model input and the finished request body in files.
+          # A large release diff can exceed Linux's per-argument size limit if
+          # either is expanded into jq's or curl's command line.
+          jq -n \
             --arg model "$OPENROUTER_MODEL" \
             --arg system "$prompt" \
             --rawfile commits model-payload.txt \
@@ -411,14 +411,14 @@ jobs:
                 {role: "system", content: $system},
                 {role: "user", content: $commits}
               ]
-            }')"
+            }' > request.json
 
           http=$(curl -sS --max-time 120 -o response.json -w '%{http_code}' \
             https://openrouter.ai/api/v1/chat/completions \
             -H "Authorization: Bearer $OPENROUTER_API_KEY" \
             -H 'Content-Type: application/json' \
             -H 'X-Title: Balatro Lite release notes' \
-            -d "$payload") || http=000
+            --data-binary @request.json) || http=000
 
           if [ "$http" != "200" ]; then
             echo "::warning::OpenRouter returned $http; keeping the plain commit list."

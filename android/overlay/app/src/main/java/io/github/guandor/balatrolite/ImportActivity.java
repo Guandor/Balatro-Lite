@@ -35,19 +35,22 @@ import java.util.concurrent.Executors;
 /** First-run importer. The APK contains no Balatro game data. */
 public final class ImportActivity extends Activity {
     private static final int PICK_GAME_FILE = 10;
+    private static final int PICK_SAVE_ZIP = 11;
     private static final String PREFS = "balatro_lite_import";
     private static final String PREF_PATCH_VERSION = "patch_version";
     private static final String PREF_PATCH_SCHEMA = "patch_schema";
     private static final String PREF_SETUP_DONE = "setup_done";
     private static final String PREF_SMALL_LAYOUT = "small_layout";
     private static final String PREF_PERFORMANCE = "performance_optimizations";
+    private static final String PREF_EXTERNAL_SAVES_MIGRATED = "external_saves_migrated";
     // Increment whenever patch behavior changes without relying on the APK's
     // versionCode. Local debug builds intentionally keep versionCode 1.
-    private static final int PATCH_SCHEMA_VERSION = 2;
+    private static final int PATCH_SCHEMA_VERSION = 3;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private TextView status;
     private Button chooseButton;
+    private Button importSaveButton;
     private ProgressBar progress;
     private RadioGroup layoutChoices;
     private RadioGroup performanceChoices;
@@ -55,6 +58,7 @@ public final class ImportActivity extends Activity {
     private File sourceLove;
     private File patchedLove;
     private File setupRequest;
+    private File externalSaveDirectory;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,10 +66,34 @@ public final class ImportActivity extends Activity {
         gameDirectory = new File(getFilesDir(), "games");
         sourceLove = new File(gameDirectory, "source.love");
         patchedLove = new File(gameDirectory, "balatro-lite.love");
-        setupRequest = new File(getFilesDir(),
-            "save/balatro-lite/android-port-setup.request");
 
         SharedPreferences preferences = getSharedPreferences(PREFS, MODE_PRIVATE);
+        File externalFiles = getExternalFilesDir(null);
+        if (externalFiles == null) {
+            buildFatalErrorInterface(
+                "External storage is unavailable. Make sure the device storage is mounted " +
+                "and restart Balatro Lite."
+            );
+            return;
+        }
+
+        externalSaveDirectory = new File(externalFiles, "save/balatro-lite");
+        try {
+            if (!preferences.getBoolean(PREF_EXTERNAL_SAVES_MIGRATED, false)) {
+                File internalSaveDirectory = new File(getFilesDir(), "save/balatro-lite");
+                SaveMigrator.copyMissing(internalSaveDirectory, externalSaveDirectory);
+                preferences.edit().putBoolean(PREF_EXTERNAL_SAVES_MIGRATED, true).apply();
+            } else {
+                SaveMigrator.ensureDirectory(externalSaveDirectory);
+            }
+        } catch (IOException error) {
+            buildFatalErrorInterface(
+                "Existing saves could not be moved to external storage: " + messageFor(error)
+            );
+            return;
+        }
+        setupRequest = new File(externalSaveDirectory, "android-port-setup.request");
+
         int patchedVersion = preferences.getInt(PREF_PATCH_VERSION, -1);
         int patchSchema = preferences.getInt(PREF_PATCH_SCHEMA, -1);
         if (sourceLove.isFile() &&
@@ -81,6 +109,25 @@ public final class ImportActivity extends Activity {
         } else {
             buildImportInterface();
         }
+    }
+
+    private void buildFatalErrorInterface(String message) {
+        int padding = dp(28);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(Gravity.CENTER);
+        root.setPadding(padding, padding, padding, padding);
+        root.setBackgroundColor(Color.rgb(24, 32, 46));
+
+        TextView title = setupText("Balatro Lite", 32, Color.rgb(246, 180, 54));
+        root.addView(title, matchWrap());
+
+        TextView explanation = setupText(message, 17, Color.rgb(255, 112, 112));
+        LinearLayout.LayoutParams explanationParams = matchWrap();
+        explanationParams.topMargin = dp(16);
+        explanationParams.width = dp(620);
+        root.addView(explanation, explanationParams);
+        setContentView(root);
     }
 
     private void buildImportInterface() {
@@ -184,6 +231,24 @@ public final class ImportActivity extends Activity {
         performanceChoices.check(preferences.getBoolean(PREF_PERFORMANCE, true) ? 2001 : 2002);
         root.addView(performanceChoices, wrapWrap());
 
+        importSaveButton = new Button(this);
+        importSaveButton.setText("Import Save (.zip)");
+        importSaveButton.setTextSize(17);
+        importSaveButton.setOnClickListener(view -> openSavePicker());
+        LinearLayout.LayoutParams importParams = wrapWrap();
+        importParams.width = dp(280);
+        importParams.topMargin = dp(12);
+        root.addView(importSaveButton, importParams);
+
+        TextView importWarning = setupText(
+            "Warning: importing replaces the current profile 1 save.",
+            14,
+            Color.rgb(255, 180, 90)
+        );
+        LinearLayout.LayoutParams warningParams = matchWrap();
+        warningParams.topMargin = dp(4);
+        root.addView(importWarning, warningParams);
+
         chooseButton = new Button(this);
         chooseButton.setText("Apply and Start Game");
         chooseButton.setTextSize(17);
@@ -199,7 +264,7 @@ public final class ImportActivity extends Activity {
         root.addView(progress, wrapWrap());
 
         status = setupText(
-            "These choices rebuild only your private imported game.",
+            "Port settings only rebuild your private imported game.",
             14,
             Color.rgb(190, 199, 214)
         );
@@ -253,24 +318,54 @@ public final class ImportActivity extends Activity {
         startActivityForResult(intent, PICK_GAME_FILE);
     }
 
+    private void openSavePicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        // ZIP MIME types vary between document providers, so validate the
+        // selected filename and archive contents ourselves.
+        intent.setType("*/*");
+        startActivityForResult(intent, PICK_SAVE_ZIP);
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != PICK_GAME_FILE || resultCode != RESULT_OK || data == null ||
-            data.getData() == null) {
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
             return;
         }
 
         Uri selected = data.getData();
         String name = displayName(selected);
         String lowerName = name.toLowerCase(Locale.ROOT);
-        if (!lowerName.endsWith(".exe") && !lowerName.endsWith(".love")) {
-            showError("Choose Balatro.exe or Balatro.love.");
-            return;
-        }
+        if (requestCode == PICK_GAME_FILE) {
+            if (!lowerName.endsWith(".exe") && !lowerName.endsWith(".love")) {
+                showError("Choose Balatro.exe or Balatro.love.");
+                return;
+            }
 
-        setBusy("Copying " + name + "…");
-        worker.execute(() -> importSelectedGame(selected));
+            setBusy("Copying " + name + "…");
+            worker.execute(() -> importSelectedGame(selected));
+        } else if (requestCode == PICK_SAVE_ZIP) {
+            if (!lowerName.endsWith(".zip")) {
+                showError("Choose a .zip containing meta.jkr, profile.jkr, and save.jkr.");
+                return;
+            }
+
+            setBusy("Importing profile 1 from " + name + "…");
+            worker.execute(() -> importSelectedSave(selected));
+        }
+    }
+
+    private void importSelectedSave(Uri selected) {
+        try (InputStream input = getContentResolver().openInputStream(selected)) {
+            if (input == null) {
+                throw new IOException("The selected ZIP could not be opened.");
+            }
+            SaveImporter.importZip(input, externalSaveDirectory);
+            showReady("Save imported into profile 1. Apply the settings to start the game.");
+        } catch (Exception error) {
+            showError(messageFor(error));
+        }
     }
 
     private void importSelectedGame(Uri selected) {
@@ -359,6 +454,9 @@ public final class ImportActivity extends Activity {
 
     private void setBusy(String message) {
         chooseButton.setEnabled(false);
+        if (importSaveButton != null) {
+            importSaveButton.setEnabled(false);
+        }
         progress.setVisibility(View.VISIBLE);
         status.setTextColor(Color.WHITE);
         status.setText(message);
@@ -371,8 +469,23 @@ public final class ImportActivity extends Activity {
     private void showError(String message) {
         runOnUiThread(() -> {
             chooseButton.setEnabled(true);
+            if (importSaveButton != null) {
+                importSaveButton.setEnabled(true);
+            }
             progress.setVisibility(View.GONE);
             status.setTextColor(Color.rgb(255, 112, 112));
+            status.setText(message);
+        });
+    }
+
+    private void showReady(String message) {
+        runOnUiThread(() -> {
+            chooseButton.setEnabled(true);
+            if (importSaveButton != null) {
+                importSaveButton.setEnabled(true);
+            }
+            progress.setVisibility(View.GONE);
+            status.setTextColor(Color.rgb(125, 220, 145));
             status.setText(message);
         });
     }

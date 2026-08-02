@@ -277,6 +277,7 @@ final class BalatroPatcher {
                     text,
                     "t.window.width = 0",
                     "t.identity = 'balatro-lite'\n" +
+                        "\tt.externalstorage = true\n" +
                         "\tt.window.width = 0\n\tt.window.usedpiscale = false",
                     1,
                     name
