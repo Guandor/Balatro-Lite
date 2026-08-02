@@ -37,7 +37,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     # Configure this environment in GitHub with required reviewers and move the
     # OPENROUTER_API_KEY secret into it. Approval then happens before any step
     # in this job receives the key or the write-capable GITHUB_TOKEN.
@@ -129,7 +129,8 @@ jobs:
           # tracked, so this is belt and braces -- except the game itself, which
           # must never be redistributed.
           rm -rf "$staging/balatrolite/saves" "$staging/balatrolite/patch-work"
-          rm -f "$staging/balatrolite/log.txt" "$staging/balatrolite/Balatro_pm"
+          rm -f "$staging/balatrolite/log.txt" "$staging/balatrolite/Balatro_pm" \
+            "$staging/balatrolite/.balatro-build.txt"
           find "$staging/balatrolite" \
             \( -iname '*.exe' -o -iname '*.love' \) -type f -delete
 
@@ -164,6 +165,105 @@ jobs:
           echo "path=dist/$name" >> "$GITHUB_OUTPUT"
           echo "Built $name ($(du -h "$out" | cut -f1))"
           unzip -l "$out" | sed -n '1,20p'
+
+      - name: Check Android signing configuration
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEY_ALIAS \
+                      ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Required release secret $name is not configured."
+              exit 1
+            fi
+          done
+
+      - name: Select JDK 17 and install Android build tools
+        run: |
+          set -euo pipefail
+          if [ -z "${JAVA_HOME_17_X64:-}" ]; then
+            echo "::error::The runner does not provide JDK 17."
+            exit 1
+          fi
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          "$JAVA_HOME_17_X64/bin/java" -version
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "ndk;25.2.9519653"
+
+      - name: Build the game-free Android APK
+        id: android
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          android_work="$RUNNER_TEMP/balatro-lite-love-android"
+          bash android/prepare-love-android.sh "$android_work"
+          (
+            cd "$android_work"
+            ./gradlew --no-daemon assembleNormalNoRecordRelease \
+              -Papp.version_code="$VERSION_CODE" \
+              -Papp.version_name="$VERSION"
+          )
+
+          unsigned="$android_work/app/build/outputs/apk/normal/noRecord/release/app-normal-noRecord-release-unsigned.apk"
+          if [ ! -f "$unsigned" ]; then
+            # Gradle 8 uses the combined flavor as one directory.
+            unsigned="$android_work/app/build/outputs/apk/normalNoRecord/release/app-normal-noRecord-release-unsigned.apk"
+          fi
+          if [ ! -f "$unsigned" ]; then
+            echo "::error::Gradle did not produce the expected unsigned APK."
+            find "$android_work/app/build/outputs" -type f -maxdepth 8 -print || true
+            exit 1
+          fi
+
+          mkdir -p dist
+          name="balatrolite-$VERSION.apk"
+          aligned="$RUNNER_TEMP/balatro-lite-aligned.apk"
+          "$ANDROID_HOME/build-tools/34.0.0/zipalign" -f -p 4 "$unsigned" "$aligned"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "path=dist/$name" >> "$GITHUB_OUTPUT"
+
+      - name: Sign and verify the Android APK
+        env:
+          APK_NAME: ${{ steps.android.outputs.name }}
+          APK_PATH: ${{ steps.android.outputs.path }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/balatro-lite-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" sign \
+            --ks "$keystore" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+            --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$APK_PATH" \
+            "$RUNNER_TEMP/balatro-lite-aligned.apk"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify \
+            --verbose --print-certs "$APK_PATH"
+
+          unzip -tq "$APK_PATH"
+          unzip -Z1 "$APK_PATH" > apk-files.txt
+          forbidden="$(grep -Ei '\.(exe|love)$' apk-files.txt || true)"
+          if [ -n "$forbidden" ]; then
+            echo "::error::APK contains forbidden purchased game data:"
+            printf '%s\n' "$forbidden"
+            exit 1
+          fi
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$APK_PATH" | sed -n '1,8p'
+          echo "Built $APK_NAME ($(du -h "$APK_PATH" | cut -f1)); no .exe or .love assets present."
 
       - name: Collect the commits and diffs since the last release
         env:
@@ -205,6 +305,7 @@ jobs:
           OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4.5' }}
           VERSION: ${{ steps.version.outputs.version }}
           ZIP_NAME: ${{ steps.build.outputs.name }}
+          APK_NAME: ${{ steps.android.outputs.name }}
           # Diffs are far bigger than the messages that used to be sent alone,
           # so this is sized for a release range rather than a commit list.
           # 300 KB is roughly 75k tokens: within the context of any model worth
@@ -226,7 +327,13 @@ jobs:
               echo
               echo "## Install"
               echo
-              echo "Requires [PortMaster](https://portmaster.games/) and your own copy of Balatro."
+              echo "Requires your own copy of Balatro."
+              echo
+              echo "### Android"
+              echo
+              echo "Install \`$APK_NAME\`. On first launch, choose your own \`Balatro.exe\`; importing and patching happen on the device."
+              echo
+              echo "### PortMaster"
               echo
               echo "Download \`$ZIP_NAME\`, then either:"
               echo
@@ -267,7 +374,8 @@ jobs:
           fi
 
           prompt='You are writing the release notes for Balatro Lite, a
-          PortMaster port of the game Balatro for Linux handheld consoles. The
+          PortMaster and Android port of the game Balatro for small-screen
+          devices. The
           user message holds the commits since the last release -- each subject
           followed by its body -- and then the full diffs for the same range,
           which may be truncated at the end.
@@ -334,9 +442,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
           ZIP_PATH: ${{ steps.build.outputs.path }}
+          APK_PATH: ${{ steps.android.outputs.path }}
         run: |
           set -euo pipefail
-          gh release create "$VERSION" "$ZIP_PATH" \
+          gh release create "$VERSION" "$ZIP_PATH" "$APK_PATH" \
             --title "Balatro Lite $VERSION" \
             --notes-file notes.md \
             --draft \

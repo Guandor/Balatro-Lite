@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.VIBRATE" />
+
+  <uses-feature android:glEsVersion="0x00020000" />
+  <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+  <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+  <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+  <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+  <uses-feature android:name="android.hardware.audio.low_latency" android:required="false" />
+
+  <application
+      android:allowBackup="true"
+      android:icon="@drawable/love"
+      android:label="${NAME}">
+    <activity
+        android:name="io.github.guandor.balatrolite.ImportActivity"
+        android:exported="true"
+        android:icon="@drawable/love"
+        android:label="${NAME}"
+        android:screenOrientation="landscape"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+        <category android:name="tv.ouya.intent.category.GAME" />
+      </intent-filter>
+    </activity>
+
+    <activity
+        android:name="org.love2d.android.GameActivity"
+        android:exported="false"
+        android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation"
+        android:label="${NAME}"
+        android:launchMode="singleInstance"
+        android:screenOrientation="landscape"
+        android:resizeableActivity="false"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
+
+    <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.files"
+        android:exported="false"
+        android:grantUriPermissions="true">
+      <meta-data
+          android:name="android.support.FILE_PROVIDER_PATHS"
+          android:resource="@xml/file_paths" />
+    </provider>
+  </application>
+</manifest>

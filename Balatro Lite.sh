@@ -53,13 +53,28 @@ elif [ -f "balatro.love" ]; then
   GAMEFILE="balatro.love"
 fi
 
-# Set to 0 to keep the stock shaders. They are trimmed by default because both
-# run over every pixel of every frame regardless of the settings that are meant
-# to turn them off, which is the largest single cost on a handheld GPU.
-TRIM_SHADERS=1
+# The layout and the performance changes are the player's to choose, and both
+# decide how the patched build is put together rather than anything the running
+# game could switch, so they are asked before it starts and the build is made to
+# the answers. The first launch asks; after that the answers are read from this
+# file. The game's options menu offers to ask again, which it does by marking
+# the file; deleting it by hand or setting this to 1 has the same effect.
+FORCE_DISPLAY_SETUP=0
+SETUP_FILE="$GAMEDIR/saves/display-setup.txt"
+# The game is told where the answers live, because its options menu is what
+# marks them to be asked again.
+export BALATRO_PM_SETUP_FILE="$SETUP_FILE"
 
-PERF_OPTIMIZATIONS=1
-export BALATRO_PM_PERF_OPTIMIZATIONS="$PERF_OPTIMIZATIONS"
+# Read back one `key=value` from the answers, or the port's own default when the
+# setup has not run or did not get that far.
+read_setting() {
+  local key="$1" fallback="$2" value=""
+  if [ -f "$SETUP_FILE" ]; then
+    value=$(sed -n "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p" \
+      "$SETUP_FILE" | tail -n 1)
+  fi
+  if [ -n "$value" ]; then echo "$value"; else echo "$fallback"; fi
+}
 
 # Set to 1 to draw a small readout in the top-left corner: frame rate, Lua heap
 # size, and how many live objects each frame has to walk. Worth turning on if
@@ -83,9 +98,12 @@ BUTTON_MAP_FILE="$GAMEDIR/saves/controller-map.txt"
 export BALATRO_PM_BUTTON_MAP_FILE="$BUTTON_MAP_FILE"
 
 # One patched build serves every device. The handheld layout reads the panel's
-# real dimensions at startup, and the only device-specific behaviour left --
-# which face button is which -- is passed in the environment at launch.
+# real dimensions at startup, and which face button is which is settled below
+# the game, in the mapping handed to SDL, rather than inside the build.
 OUTPUT_GAME="Balatro_pm"
+# What the build in hand was made from, so answering the setup differently is
+# noticed and rebuilt for rather than silently ignored.
+BUILD_STAMP="$GAMEDIR/.balatro-build.txt"
 
 PATCHDIR="$GAMEDIR/patch-work"
 WORKFILE="$GAMEDIR/.balatro-patching.${GAMEFILE##*.}"
@@ -97,6 +115,8 @@ cleanup_patch_work() {
   rm -f "$PATCHDIR/globals.lua" "$PATCHDIR/main.lua" "$PATCHDIR/game.lua"
   rm -f "$PATCHDIR/cardarea.lua" "$PATCHDIR/engine/text.lua"
   rm -f "$PATCHDIR/portmaster/small_screen.lua"
+  rm -f "$PATCHDIR/portmaster/options.lua" "$PATCHDIR/portmaster/perf.lua"
+  rm -f "$PATCHDIR/portmaster/controls.lua"
   rm -f "$PATCHDIR/resources/fonts/m6x11plus.ttf"
   rm -f "$PATCHDIR/resources/shaders/CRT.fs"
   rm -f "$PATCHDIR/resources/shaders/background.fs"
@@ -109,24 +129,48 @@ build_patched_game() {
   cp "$GAMEFILE" "$WORKFILE" || return 1
   cd "$PATCHDIR" || return 1
 
-  # Defaults for new profiles. The layout module also reapplies these after
-  # saved desktop settings load, so an existing profile cannot restore CRT blur.
-  "$SEVENZIP" x -aoa "$WORKFILE" globals.lua >/dev/null || return 1
-  sed -i 's/crt = 70,/crt = 0,/g' globals.lua || return 1
-  sed -i 's/bloom = 1/bloom = 0/g' globals.lua || return 1
-  sed -i "s/shadows = 'On'/shadows = 'Off'/g" globals.lua || return 1
-  sed -i 's/self.F_HIDE_BG = false/self.F_HIDE_BG = true/g' globals.lua || return 1
-  "$SEVENZIP" u -aoa "$WORKFILE" globals.lua >/dev/null || return 1
-
-  # Inject the responsive room and HUD, readable descriptions, and
-  # screen-clamped controller tooltips.
-  "$SEVENZIP" x -aoa "$WORKFILE" main.lua game.lua cardarea.lua engine/text.lua \
-    >/dev/null || return 1
-  mkdir -p portmaster || return 1
-  cp "$GAMEDIR/patches/small_screen.lua" portmaster/small_screen.lua || return 1
-  if ! grep -q 'portmaster/small_screen' main.lua; then
-    sed -i '/require "challenges"/a require "portmaster/small_screen"' main.lua || return 1
+  if [ "$PERF_OPTIMIZATIONS" -eq 1 ]; then
+    # Defaults for new profiles. These are the effects half of the performance
+    # answer, so they follow it rather than the layout: the performance module
+    # reapplies the same values after a saved profile loads, and hands them back
+    # when the answer changes. Neither is touched when the answer is no.
+    "$SEVENZIP" x -aoa "$WORKFILE" globals.lua >/dev/null || return 1
+    sed -i 's/crt = 70,/crt = 0,/g' globals.lua || return 1
+    sed -i 's/bloom = 1/bloom = 0/g' globals.lua || return 1
+    sed -i "s/shadows = 'On'/shadows = 'Off'/g" globals.lua || return 1
+    "$SEVENZIP" u -aoa "$WORKFILE" globals.lua >/dev/null || return 1
   fi
+
+  # The options-menu entry, the handheld pause-menu fix and the performance work
+  # all go in whichever layout was chosen -- none of them is about how the
+  # screen is arranged. The responsive room and HUD, readable descriptions and
+  # screen-clamped tooltips are the small screen layout itself and go in only
+  # when it was asked for.
+  MODULES="portmaster/options.lua portmaster/controls.lua portmaster/perf.lua"
+  [ "$LAYOUT" = "small" ] && MODULES="$MODULES portmaster/small_screen.lua"
+
+  # game.lua, cardarea.lua and engine/text.lua are only rewritten by the
+  # performance work, so with it off they are left in the archive untouched.
+  SOURCES="main.lua"
+  if [ "$PERF_OPTIMIZATIONS" -eq 1 ]; then
+    SOURCES="main.lua game.lua cardarea.lua engine/text.lua"
+  fi
+
+  "$SEVENZIP" x -aoa "$WORKFILE" $SOURCES >/dev/null || return 1
+  mkdir -p portmaster || return 1
+  for module in $MODULES; do
+    cp "$GAMEDIR/patches/${module#portmaster/}" "$module" || return 1
+  done
+  # Inserted one at a time and in reverse, because each lands directly after the
+  # line it is anchored to: the layout is read after the modules it does not
+  # touch, and the performance work last, so its wrappers sit outermost.
+  for module in portmaster/perf portmaster/small_screen portmaster/controls \
+                portmaster/options; do
+    case " $MODULES " in *" $module.lua "*) ;; *) continue ;; esac
+    grep -q "$module" main.lua && continue
+    sed -i "/require \"challenges\"/a require \"$module\"" main.lua || return 1
+  done
+
   # Reduced motion used to multiply animation expressions by zero after their
   # sin/cos calls had already run. Guard the expensive terms themselves. These
   # counts intentionally pin the rewrite to the purchased 1.0.1o source: an
@@ -176,10 +220,12 @@ build_patched_game() {
     expect_occurrences 1 engine/text.lua 'if self.config.bump then letter.offset.y = (G.SETTINGS.reduced_motion and 0 or self.bump_amount' || return 1
   fi
 
-  "$SEVENZIP" u -aoa "$WORKFILE" main.lua game.lua cardarea.lua engine/text.lua \
-    portmaster/small_screen.lua >/dev/null || return 1
+  "$SEVENZIP" u -aoa "$WORKFILE" $SOURCES $MODULES >/dev/null || return 1
 
-  if [ "$TRIM_SHADERS" -eq 1 ]; then
+  # Both of these run over every pixel of every frame regardless of the settings
+  # that are meant to turn them off, which is the largest single cost on a
+  # handheld GPU -- and both are left stock when the performance answer was no.
+  if [ "$PERF_OPTIMIZATIONS" -eq 1 ]; then
     "$SEVENZIP" x -aoa "$WORKFILE" resources/shaders/CRT.fs \
       resources/shaders/background.fs >/dev/null || return 1
 
@@ -199,24 +245,28 @@ build_patched_game() {
     # five iterations of five trig calls each, per pixel, per frame. Two
     # iterations keep the broad swirl and colours while dropping three fifths
     # of that loop work. Reduced motion also caches the settled result in Lua.
-    if [ "$PERF_OPTIMIZATIONS" -eq 1 ]; then
-      expect_occurrences 1 resources/shaders/background.fs 'i < 5; i++' || return 1
-      sed -i 's/i < 5; i++/i < 2; i++/' resources/shaders/background.fs || return 1
-      expect_occurrences 1 resources/shaders/background.fs 'i < 2; i++' || return 1
-    fi
+    expect_occurrences 1 resources/shaders/background.fs 'i < 5; i++' || return 1
+    sed -i 's/i < 5; i++/i < 2; i++/' resources/shaders/background.fs || return 1
+    expect_occurrences 1 resources/shaders/background.fs 'i < 2; i++' || return 1
 
     "$SEVENZIP" u -aoa "$WORKFILE" resources/shaders/CRT.fs \
       resources/shaders/background.fs >/dev/null || return 1
   fi
 
-  # Nunito is substantially clearer than the pixel font at handheld sizes.
-  mkdir -p resources/fonts || return 1
-  cp "$GAMEDIR/resources/fonts/Nunito-Black.ttf" resources/fonts/m6x11plus.ttf || return 1
-  "$SEVENZIP" u -aoa "$WORKFILE" resources/fonts/m6x11plus.ttf >/dev/null || return 1
+  if [ "$LAYOUT" = "small" ]; then
+    # Nunito is substantially clearer than the pixel font at handheld sizes.
+    # The original layout keeps the game's own font, the same as everything
+    # else about the way it looks.
+    mkdir -p resources/fonts || return 1
+    cp "$GAMEDIR/resources/fonts/Nunito-Black.ttf" resources/fonts/m6x11plus.ttf || return 1
+    "$SEVENZIP" u -aoa "$WORKFILE" resources/fonts/m6x11plus.ttf >/dev/null || return 1
+  fi
 
   # Test the complete archive before installing the generated output.
   "$SEVENZIP" t "$WORKFILE" >/dev/null || return 1
-  "$SEVENZIP" l "$WORKFILE" | grep -q 'portmaster/small_screen.lua' || return 1
+  for module in $MODULES; do
+    "$SEVENZIP" l "$WORKFILE" | grep -q "$module" || return 1
+  done
 
   cd "$GAMEDIR" || return 1
   mv -f "$WORKFILE" "$OUTPUT_GAME" || return 1
@@ -226,11 +276,20 @@ build_patched_game() {
 # The build is made once and kept, so an updated port would otherwise keep
 # launching the archive the previous version produced -- the layout, the options
 # menu, and everything else patched in would silently stay at the old revision.
-# Rebuild when anything that goes into it is newer than it is.
+# Rebuild when anything that goes into it is newer than it is, and when the
+# answers it was made for are no longer the answers in force.
+build_signature() {
+  echo "layout=$LAYOUT performance=$PERFORMANCE"
+}
+
 needs_build() {
   [ -z "$GAMEFILE" ] && return 1
   [ ! -f "$OUTPUT_GAME" ] && return 0
+  [ ! -f "$BUILD_STAMP" ] && return 0
+  [ "$(cat "$BUILD_STAMP")" != "$(build_signature)" ] && return 0
   for source in "$LAUNCHER" "$GAMEDIR/patches/small_screen.lua" \
+                "$GAMEDIR/patches/options.lua" "$GAMEDIR/patches/perf.lua" \
+                "$GAMEDIR/patches/controls.lua" \
                 "$GAMEDIR/resources/fonts/Nunito-Black.ttf" "$GAMEDIR/$GAMEFILE"; do
     if [ -f "$source" ] && [ "$source" -nt "$OUTPUT_GAME" ]; then
       return 0
@@ -239,9 +298,22 @@ needs_build() {
   return 1
 }
 
-if needs_build; then
+build_if_needed() {
+  # A build cannot be remade from a game file that is no longer there, so an
+  # answer that asks for a different one has nothing to act on. Say so rather
+  # than start the build in hand as though it were what was asked for.
+  if [ -z "$GAMEFILE" ] && [ -f "$OUTPUT_GAME" ] &&
+     [ "$(cat "$BUILD_STAMP" 2>/dev/null)" != "$(build_signature)" ]; then
+    echo "The Balatro game file is missing, so ${OUTPUT_GAME} cannot be rebuilt."
+    echo "It is being launched as it was last built. Copy the game file back to apply the display setup."
+  fi
+  needs_build || return 0
   echo "Preparing the ${OUTPUT_GAME} handheld build..."
+  # Removed first, so a build that fails halfway is never mistaken on the next
+  # launch for one that matches the answers.
+  rm -f "$BUILD_STAMP"
   if build_patched_game; then
+    build_signature > "$BUILD_STAMP"
     echo "Handheld build ready."
     for stale in Balatro_4x3 Balatro_1x1; do
       [ -f "$stale" ] && echo "An older ${stale} build is still here and can be deleted."
@@ -251,21 +323,94 @@ if needs_build; then
   fi
   cd "$GAMEDIR" || exit 1
   cleanup_patch_work
-fi
-
-DEVICE_PRINTS_SWAPPED_FACE_LABELS=0
+}
 
 if [ "${DEVICE_NAME}" = "TrimUI Smart Pro" ] || [ "${DEVICE_NAME}" = "TrimUI Brick" ]; then
-  # TrimUI prints its face buttons in the physical AB/XY order. This is only the
-  # guess used when the player has not answered the button setup; an answer
-  # describes the device it was given on and always wins.
-  DEVICE_PRINTS_SWAPPED_FACE_LABELS=1
-
   # The bundled versions of these libraries conflict with TrimUI's runtime.
   LIBDIR="$GAMEDIR/libs.${DEVICE_ARCH}"
   [ -f "$LIBDIR/libfontconfig.so.1" ] && $ESUDO rm -f "$LIBDIR/libfontconfig.so.1"
   [ -f "$LIBDIR/libtheoradec.so.1" ] && $ESUDO rm -f "$LIBDIR/libtheoradec.so.1"
 fi
+
+# A run of the button setup that ends without an answer -- skipped, timed out,
+# or no controller attached -- still leaves its file behind, holding comments
+# and no mapping, so the questions are asked once rather than on every launch.
+#
+# SDL reads this before anything opens the pad, and a mapping given here
+# outranks both the device's own database entry and the one LOVE bundles.
+# Balatro then sees the buttons under the names the player gave them, which is
+# also what its on-screen prompts are drawn from. Appended last: SDL keeps the
+# final mapping for a given controller.
+apply_button_map() {
+  BUTTON_MAP=""
+  if [ -f "$BUTTON_MAP_FILE" ]; then
+    BUTTON_MAP=$(grep -v '^[[:space:]]*#' "$BUTTON_MAP_FILE" | grep -m 1 '[^[:space:]]')
+  fi
+  [ -z "$BUTTON_MAP" ] && return 0
+  if [ -n "$SDL_GAMECONTROLLERCONFIG" ]; then
+    export SDL_GAMECONTROLLERCONFIG="${SDL_GAMECONTROLLERCONFIG}
+${BUTTON_MAP}"
+  else
+    export SDL_GAMECONTROLLERCONFIG="$BUTTON_MAP"
+  fi
+}
+
+# Nothing below can produce a game out of nothing, so say so before spending a
+# platform helper and a build on it.
+if [ -z "$GAMEFILE" ] && [ ! -f "$OUTPUT_GAME" ] && [ ! -f "Balatro" ]; then
+  echo "Balatro game file not found. Copy Balatro.exe or Balatro.love into the balatro folder, then launch again."
+  pm_finish
+  exit 0
+fi
+
+pm_platform_helper "./bin/love.${DEVICE_ARCH}"
+
+# Everything from here sits after the platform helper, so the questions are
+# asked on the display the game is about to use and under the same environment,
+# and nothing the helper sets up can overwrite the mapping afterwards. They sit
+# before gptokeyb because it is started to watch the game: the setup screens
+# bring their own ways out instead -- each gives up on its own if it is left
+# alone, and quits rather than stopping on an error.
+
+# Before the display setup rather than after it, so that screen is answered
+# through the buttons the player has already described. On a first launch there
+# is nothing to apply yet, and it reads the pad raw instead.
+apply_button_map
+
+# First, because the answers decide what is built, and the build has to be the
+# one the rest of this launch runs.
+#
+# The mark the game's options menu leaves is taken out before the questions are
+# asked rather than after, because it means "ask on the next launch" and this is
+# that launch. Removing it afterwards would be left undone by a setup screen
+# that could not run, and the port would then ask again on every launch and
+# report itself as waiting for a restart forever. Removing the button map has
+# the same shape and needs no such care: running the setup is what puts it back.
+if [ "$FORCE_DISPLAY_SETUP" -eq 1 ] || [ ! -f "$SETUP_FILE" ] ||
+   grep -q '^[[:space:]]*ask[[:space:]]*=[[:space:]]*1' "$SETUP_FILE" 2>/dev/null; then
+  if [ -f "$SETUP_FILE" ]; then
+    sed -i '/^[[:space:]]*ask[[:space:]]*=[[:space:]]*1[[:space:]]*$/d' "$SETUP_FILE"
+  fi
+  echo "Asking about the layout and performance..."
+  BALATRO_PM_SETUP_FONT="$GAMEDIR/resources/fonts/Nunito-Black.ttf" \
+    ./bin/love.${DEVICE_ARCH} ./displaysetup
+fi
+
+# Anything but the one word that means otherwise is the port's own default, so a
+# file that was edited by hand into something unreadable is a working port with
+# the usual answers rather than a broken one. Normalised rather than merely
+# tested, because these two words are also the build's signature.
+LAYOUT=$(read_setting layout small)
+PERFORMANCE=$(read_setting performance on)
+[ "$LAYOUT" = "original" ] || LAYOUT="small"
+[ "$PERFORMANCE" = "off" ] || PERFORMANCE="on"
+
+if [ "$PERFORMANCE" = "off" ]; then PERF_OPTIMIZATIONS=0; else PERF_OPTIMIZATIONS=1; fi
+# The runtime half of the same answer: the module the build injects reads this
+# and leaves the game alone when the answer was no.
+export BALATRO_PM_PERF_OPTIMIZATIONS="$PERF_OPTIMIZATIONS"
+
+build_if_needed
 
 LAUNCH_GAME="$OUTPUT_GAME"
 
@@ -276,48 +421,17 @@ if [ ! -f "$LAUNCH_GAME" ] && [ -f "Balatro" ]; then
 fi
 
 if [ -f "$LAUNCH_GAME" ]; then
-  pm_platform_helper "./bin/love.${DEVICE_ARCH}"
-
-  # Both of these sit after the platform helper, so the questions are asked on
-  # the display the game is about to use, under the same environment, and
-  # nothing the helper sets up can overwrite the mapping afterwards. They sit
-  # before gptokeyb because it is started to watch the game: the setup screen
-  # brings its own ways out instead -- it gives up on its own if it is left
-  # alone, and quits rather than stopping on an error.
   if [ "$FORCE_BUTTON_SETUP" -eq 1 ] || [ ! -f "$BUTTON_MAP_FILE" ]; then
     echo "Checking which button is which..."
     BALATRO_PM_BUTTON_FONT="$GAMEDIR/resources/fonts/Nunito-Black.ttf" \
       ./bin/love.${DEVICE_ARCH} ./buttonsetup
-  fi
-
-  # A run that ends without an answer -- skipped, timed out, or no controller
-  # attached -- still leaves the file behind, holding comments and no mapping,
-  # so the questions are asked once rather than on every launch.
-  BUTTON_MAP=""
-  if [ -f "$BUTTON_MAP_FILE" ]; then
-    BUTTON_MAP=$(grep -v '^[[:space:]]*#' "$BUTTON_MAP_FILE" | grep -m 1 '[^[:space:]]')
-  fi
-
-  if [ -n "$BUTTON_MAP" ]; then
-    # SDL reads this before anything opens the pad, and a mapping given here
-    # outranks both the device's own database entry and the one LOVE bundles.
-    # Balatro then sees the buttons under the names the player gave them, which
-    # is also what its on-screen prompts are drawn from. Appended last: SDL
-    # keeps the final mapping for a given controller.
-    if [ -n "$SDL_GAMECONTROLLERCONFIG" ]; then
-      export SDL_GAMECONTROLLERCONFIG="${SDL_GAMECONTROLLERCONFIG}
-${BUTTON_MAP}"
-    else
-      export SDL_GAMECONTROLLERCONFIG="$BUTTON_MAP"
-    fi
-  elif [ "$DEVICE_PRINTS_SWAPPED_FACE_LABELS" -eq 1 ]; then
-    export BALATRO_PM_SWAP_FACE_BUTTONS=1
+    apply_button_map
   fi
 
   $GPTOKEYB "love.${DEVICE_ARCH}" &
   ./bin/love.${DEVICE_ARCH} "$LAUNCH_GAME"
 else
-  echo "Balatro game file not found. Copy Balatro.exe or Balatro.love into the balatro folder, then launch again."
+  echo "The handheld build could not be made, so there is nothing to launch."
 fi
 
 pm_finish

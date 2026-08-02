@@ -1,1 +1,5 @@
 balatrolite/Balatro.exe
+android/build/
+.upstream-love-android/
+*.jks
+*.keystore
