@@ -1,7 +1,7 @@
 -- PortMaster handheld layout for Balatro.
 --
 -- This file is injected into the user's licensed Balatro archive by the
--- Balatro Lite launcher, and only when the launcher's display setup was
+-- Balatro launcher, and only when the launcher's display setup was
 -- answered with the small screen layout -- choosing the original one builds
 -- without it, which is the whole of what that answer does. Its siblings
 -- options.lua, controls.lua and perf.lua are injected either way: nothing in

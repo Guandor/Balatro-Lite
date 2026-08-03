@@ -1,5 +1,5 @@
-# Packages the port the way port.json describes it -- "Balatro Lite.sh" and the
-# balatrolite folder, nothing else -- and publishes a draft GitHub release for
+# Builds the same installable balatro.zip layout as PortMaster's release builder
+# and publishes it with the Android APK in a draft GitHub release for
 # a maintainer to inspect and publish.
 #
 # Run it by pushing a tag (git tag v1.2.0 && git push origin v1.2.0). Release
@@ -111,10 +111,36 @@ jobs:
           set -euo pipefail
           staging="$(mktemp -d)"
 
-          # Exactly the two items port.json lists. The repo README stays behind;
-          # balatrolite.md is the copy that ships.
-          cp "Balatro Lite.sh" "$staging/"
-          cp -r balatrolite "$staging/"
+          # PortMaster stores metadata beside the port source, then moves it
+          # into the installable balatro folder when building balatro.zip.
+          cp "Balatro.sh" "$staging/"
+          mkdir -p "$staging/balatro"
+          cp -r balatro/. "$staging/balatro/"
+          rm -f "$staging/balatro/.gitignore"
+          # The repository README also documents the independent Android APK.
+          # Remove its marked repository-only blocks from the PortMaster ZIP.
+          python3 - README.md "$staging/balatro/balatro.md" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          source = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+          start = "<!-- PORTMASTER_REPACK_REMOVE_START -->"
+          end = "<!-- PORTMASTER_REPACK_REMOVE_END -->"
+          if source.count(start) == 0 or source.count(start) != source.count(end):
+              raise SystemExit("README repository-only markers are missing or unbalanced.")
+          pattern = rf"(?ms)^{re.escape(start)}\n.*?^{re.escape(end)}(?:\n)?"
+          output = re.sub(pattern, "", source)
+          output = re.sub(r"\n{3,}", "\n\n", output)
+          if start in output or end in output:
+              raise SystemExit("README repository-only markers were not removed cleanly.")
+          pathlib.Path(sys.argv[2]).write_text(output, encoding="utf-8", newline="\n")
+          PY
+          cp cover.png gameinfo.xml screenshot.jpg "$staging/balatro/"
+          # PortMaster serializes the manifest with four-space indentation in
+          # the built ZIP. Match that output rather than copying source bytes.
+          python3 -c 'import json, sys; json.dump(json.load(open(sys.argv[1], encoding="utf-8")), open(sys.argv[2], "w", encoding="utf-8"), indent=4)' \
+            port.json "$staging/balatro/port.json"
 
           # Info-ZIP follows links unless explicitly told otherwise. Reject
           # links instead of shipping them or risking a runner file being
@@ -128,27 +154,27 @@ jobs:
           # Anything a device or a local test run leaves behind. None of it is
           # tracked, so this is belt and braces -- except the game itself, which
           # must never be redistributed.
-          rm -rf "$staging/balatrolite/saves" "$staging/balatrolite/patch-work"
-          rm -f "$staging/balatrolite/log.txt" "$staging/balatrolite/Balatro_pm" \
-            "$staging/balatrolite/.balatro-build.txt"
-          find "$staging/balatrolite" \
+          rm -rf "$staging/balatro/saves" "$staging/balatro/patch-work"
+          rm -f "$staging/balatro/log.txt" "$staging/balatro/Balatro_pm" \
+            "$staging/balatro/.balatro-build.txt"
+          find "$staging/balatro" \
             \( -iname '*.exe' -o -iname '*.love' \) -type f -delete
 
           # PortMaster chmods bin/* itself, but the launcher has to be runnable
           # before it can do that.
-          chmod +x "$staging/Balatro Lite.sh"
-          find "$staging/balatrolite/bin" -type f -exec chmod +x {} +
+          chmod +x "$staging/Balatro.sh"
+          find "$staging/balatro/bin" -type f -exec chmod +x {} +
 
           mkdir -p dist
-          name="balatrolite-$VERSION.zip"
+          name="balatro.zip"
           out="$PWD/dist/$name"
-          ( cd "$staging" && zip -r -q -X "$out" "Balatro Lite.sh" balatrolite )
+          ( cd "$staging" && zip -r -q -X "$out" "Balatro.sh" balatro )
 
           # Test the archive and verify both the allowlist and the files that
           # must never be redistributed.
           unzip -tq "$out"
           zipinfo -1 "$out" > archive-files.txt
-          unexpected="$(grep -Ev '^(Balatro Lite\.sh|balatrolite(/.*)?)$' archive-files.txt || true)"
+          unexpected="$(grep -Ev '^(Balatro\.sh|balatro(/.*)?)$' archive-files.txt || true)"
           if [ -n "$unexpected" ]; then
             echo "::error::Archive contains an unexpected top-level path:"
             printf '%s\n' "$unexpected"
@@ -340,7 +366,7 @@ jobs:
               echo "- copy it, still zipped, into PortMaster's \`autoinstall\` folder and open PortMaster, or"
               echo "- unzip it into your device's \`ports\` folder."
               echo
-              echo "Either way, then copy your Balatro game file into the \`balatrolite\` folder."
+              echo "Either way, then copy your Balatro game file into the \`balatro\` folder."
               echo "See the README for which file that is."
             } >> notes.md
           }
@@ -373,8 +399,8 @@ jobs:
             echo "::warning::Model input was truncated at $MODEL_INPUT_LIMIT bytes."
           fi
 
-          prompt='You are writing the release notes for Balatro Lite, a
-          PortMaster and Android port of the game Balatro for small-screen
+          prompt='You are writing the release notes for Balatro, a
+          PortMaster and Android handheld port of the game for small-screen
           devices. The
           user message holds the commits since the last release -- each subject
           followed by its body -- and then the full diffs for the same range,
@@ -417,7 +443,7 @@ jobs:
             https://openrouter.ai/api/v1/chat/completions \
             -H "Authorization: Bearer $OPENROUTER_API_KEY" \
             -H 'Content-Type: application/json' \
-            -H 'X-Title: Balatro Lite release notes' \
+            -H 'X-Title: Balatro release notes' \
             --data-binary @request.json) || http=000
 
           if [ "$http" != "200" ]; then
@@ -446,7 +472,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$VERSION" "$ZIP_PATH" "$APK_PATH" \
-            --title "Balatro Lite $VERSION" \
+            --title "Balatro $VERSION" \
             --notes-file notes.md \
             --draft \
             --target "$GITHUB_SHA"

@@ -1,4 +1,10 @@
-balatrolite/Balatro.exe
+balatro/*.exe
+balatro/*.love
+balatro/Balatro_pm
+balatro/.balatro-build.txt
+balatro/log.txt
+balatro/patch-work/
+balatro/saves/
 android/build/
 .upstream-love-android/
 *.jks

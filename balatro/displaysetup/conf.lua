@@ -1,9 +1,9 @@
 function love.conf(t)
-    t.identity = 'balatrolite-displaysetup'
+    t.identity = 'balatro-displaysetup'
     t.version = '11.5'
     t.console = false
 
-    t.window.title = 'Balatro Lite - Display Setup'
+    t.window.title = 'Balatro - Display Setup'
     -- Zero means the desktop's own size, which on a handheld is the panel.
     t.window.width = 0
     t.window.height = 0

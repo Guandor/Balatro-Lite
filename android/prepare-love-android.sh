@@ -28,15 +28,15 @@ cp -R "$repo_root/android/overlay/." "$output/"
 cp "$repo_root/android/gradle.properties" "$output/gradle.properties"
 
 mkdir -p "$output/app/src/main/assets/patches"
-cp "$repo_root/balatrolite/patches/small_screen.lua" \
+cp "$repo_root/balatro/patches/small_screen.lua" \
   "$output/app/src/main/assets/patches/small_screen.lua"
-cp "$repo_root/balatrolite/patches/options.lua" \
+cp "$repo_root/balatro/patches/options.lua" \
   "$output/app/src/main/assets/patches/options.lua"
-cp "$repo_root/balatrolite/patches/controls.lua" \
+cp "$repo_root/balatro/patches/controls.lua" \
   "$output/app/src/main/assets/patches/controls.lua"
-cp "$repo_root/balatrolite/patches/perf.lua" \
+cp "$repo_root/balatro/patches/perf.lua" \
   "$output/app/src/main/assets/patches/perf.lua"
-cp "$repo_root/balatrolite/resources/fonts/Nunito-Black.ttf" \
+cp "$repo_root/balatro/resources/fonts/Nunito-Black.ttf" \
   "$output/app/src/main/assets/patches/Nunito-Black.ttf"
 
 echo "Prepared LÖVE Android at $output"

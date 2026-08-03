@@ -1,4 +1,4 @@
--- Balatro Lite display setup.
+-- Balatro display setup.
 --
 -- Two questions asked before the game starts: which layout to play with, and
 -- whether to take the performance changes. Neither can be a setting inside the
@@ -120,7 +120,7 @@ local function write_output()
     if not OUTPUT_PATH then return false end
     local file = io.open(OUTPUT_PATH, 'w')
     if not file then return false end
-    file:write('# Balatro Lite display setup.\n')
+    file:write('# Balatro display setup.\n')
     file:write('# Choose "Display Setup" in the game\'s options menu to be asked\n')
     file:write('# again, or delete this file.\n')
     for _, page in ipairs(PAGES) do
@@ -493,7 +493,7 @@ function love.draw()
     set_colour(BG)
     love.graphics.rectangle('fill', 0, 0, w, h)
 
-    centred_line('BALATRO LITE  ·  DISPLAY SETUP', h*0.05, h*0.045, DIM)
+    centred_line('BALATRO  ·  DISPLAY SETUP', h*0.05, h*0.045, DIM)
 
     if state == 'saved' then
         centred_line(changed and 'Saved. Rebuilding Balatro...'

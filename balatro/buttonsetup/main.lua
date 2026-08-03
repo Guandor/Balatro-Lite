@@ -1,4 +1,4 @@
--- Balatro Lite button setup.
+-- Balatro button setup.
 --
 -- Handhelds disagree about which physical button is A. Some print the Xbox
 -- arrangement, some the Nintendo one, and the SDL mapping a device ships with
@@ -95,14 +95,14 @@ end
 -- a device that cannot complete the wizard -- no controller, a crash, a player
 -- who walked away -- would meet it again on every single launch.
 local function finish_without_mapping(reason)
-    write_output('# Balatro Lite button setup: ' .. reason .. '.\n' ..
+    write_output('# Balatro button setup: ' .. reason .. '.\n' ..
         '# The device\'s own button mapping is being used.\n' ..
         '# Delete this file to be asked about the buttons again.\n')
     love.event.quit()
 end
 
 local function save_and_quit()
-    write_output('# Balatro Lite button setup.\n' ..
+    write_output('# Balatro button setup.\n' ..
         '# Delete this file to be asked about the buttons again.\n' ..
         built_mapping .. '\n')
     state = 'saved'
@@ -446,7 +446,7 @@ function love.draw()
     set_colour(BG)
     love.graphics.rectangle('fill', 0, 0, w, h)
 
-    centred(fonts.title, 'BALATRO LITE  ·  BUTTON SETUP', h*0.06, DIM)
+    centred(fonts.title, 'BALATRO  ·  BUTTON SETUP', h*0.06, DIM)
 
     if state == 'intro' then
         centred(fonts.body, 'Press any button to begin.', h*0.42, ACCENT)
