@@ -119,7 +119,7 @@ jobs:
           rm -f "$staging/balatro/.gitignore"
           # The repository README also documents the independent Android APK.
           # Remove its marked repository-only blocks from the PortMaster ZIP.
-          python3 - README.md "$staging/balatro/balatro.md" <<'PY'
+          python3 - README.md "$staging/balatro/balatro.md" "$staging" <<'PY'
           import pathlib
           import re
           import sys
@@ -135,11 +135,24 @@ jobs:
           if start in output or end in output:
               raise SystemExit("README repository-only markers were not removed cleanly.")
           pathlib.Path(sys.argv[2]).write_text(output, encoding="utf-8", newline="\n")
+
+          staging = pathlib.Path(sys.argv[3])
+          shell_files = [staging / "Balatro.sh", staging / "balatro/tools/patchscript"]
+          lua_files = (staging / "balatro").rglob("*.lua")
+          for path in [*shell_files, *lua_files]:
+              code = path.read_text(encoding="utf-8")
+              if path.suffix == ".lua":
+                  code = re.sub(r"(?m)^[ \t]*--[^\n]*(?:\n|$)", "", code)
+                  code = code.lstrip("\n")
+              else:
+                  code = re.sub(r"(?m)^(?!#!)[ \t]*#[^\n]*(?:\n|$)", "", code)
+              code = re.sub(r"\n{3,}", "\n\n", code)
+              path.write_text(code, encoding="utf-8", newline="\n")
           PY
           cp cover.png gameinfo.xml screenshot.jpg "$staging/balatro/"
           # PortMaster serializes the manifest with four-space indentation in
           # the built ZIP. Match that output rather than copying source bytes.
-          python3 -c 'import json, sys; json.dump(json.load(open(sys.argv[1], encoding="utf-8")), open(sys.argv[2], "w", encoding="utf-8"), indent=4)' \
+          python3 -c 'import json, sys; data=json.load(open(sys.argv[1], encoding="utf-8")); data["attr"]["runtime"] = data["attr"]["runtime"] or []; json.dump(data, open(sys.argv[2], "w", encoding="utf-8"), indent=4)' \
             port.json "$staging/balatro/port.json"
 
           # Info-ZIP follows links unless explicitly told otherwise. Reject
